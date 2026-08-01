@@ -1,7 +1,7 @@
 # Local-only / large data — do not push
 Varsity/
-EDGE/
-MARVIS/
+EDGE
+MARVIS
 images/
 outputs/
 data/
