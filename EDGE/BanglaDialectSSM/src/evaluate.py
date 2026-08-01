@@ -2,6 +2,9 @@
 evaluate.py
 -----------
 Check matched vs mismatched similarity, plus a per-area breakdown.
+
+Uses batched encoding so large corpora (40k+ pairs) finish quickly
+and show a progress bar (does not look "stuck").
 """
 
 from __future__ import annotations
@@ -13,6 +16,8 @@ from pathlib import Path
 
 import torch
 import yaml
+from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from src.dataset import DialectPairDataset
 from src.model import ToyStateEncoder
@@ -32,6 +37,12 @@ def load_config(path: str) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="config.yaml")
+    parser.add_argument(
+        "--max-pairs",
+        type=int,
+        default=0,
+        help="If >0, only evaluate first N pairs (faster smoke test)",
+    )
     args = parser.parse_args()
     config = load_config(args.config)
 
@@ -39,8 +50,14 @@ def main() -> None:
     if not ckpt_path.exists():
         raise FileNotFoundError(f"Train first. Missing: {ckpt_path}")
 
+    print("Loading tokenizer, dataset, checkpoint...")
     tokenizer = WordTokenizer.load(Path(config["paths"]["vocab_file"]))
     dataset = DialectPairDataset(Path(config["paths"]["processed_pairs"]), tokenizer)
+
+    if args.max_pairs and args.max_pairs < len(dataset):
+        # Lightweight subset for quick checks
+        dataset.pairs = dataset.pairs[: args.max_pairs]
+        print(f"Evaluating subset: {len(dataset)} pairs (--max-pairs)")
 
     ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=True)
     model = ToyStateEncoder(
@@ -55,29 +72,27 @@ def main() -> None:
     model.load_state_dict(ckpt["model_state"])
     model.eval()
 
+    batch_size = int(config["training"].get("batch_size", 32))
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+
     standard_area = area_to_id("standard")
     dialect_vecs = []
     standard_vecs = []
     area_names = []
 
-    for i in range(len(dataset)):
-        item = dataset[i]
-        d = model(
-            item["dialect_ids"].unsqueeze(0),
-            item["dialect_mask"].unsqueeze(0),
-            item["area_id"].unsqueeze(0),
-        )
-        s = model(
-            item["standard_ids"].unsqueeze(0),
-            item["standard_mask"].unsqueeze(0),
-            torch.tensor([standard_area]),
-        )
-        dialect_vecs.append(d.squeeze(0))
-        standard_vecs.append(s.squeeze(0))
-        area_names.append(id_to_area(int(item["area_id"].item())))
+    print(f"Encoding {len(dataset)} pairs in batches of {batch_size}...")
+    for batch in tqdm(loader, desc="Evaluate"):
+        d = model(batch["dialect_ids"], batch["dialect_mask"], batch["area_id"])
+        std_ids = torch.full_like(batch["area_id"], standard_area)
+        s = model(batch["standard_ids"], batch["standard_mask"], std_ids)
 
-    dialect_mat = torch.stack(dialect_vecs)
-    standard_mat = torch.stack(standard_vecs)
+        dialect_vecs.append(d)
+        standard_vecs.append(s)
+        for aid in batch["area_id"].tolist():
+            area_names.append(id_to_area(int(aid)))
+
+    dialect_mat = torch.cat(dialect_vecs, dim=0)
+    standard_mat = torch.cat(standard_vecs, dim=0)
 
     matched = (dialect_mat * standard_mat).sum(dim=-1)
     rolled = torch.roll(standard_mat, shifts=1, dims=0)
@@ -89,7 +104,6 @@ def main() -> None:
     print("Matched should be HIGHER than mismatched if training worked.")
     print()
 
-    # Per-area matched similarity
     by_area: dict[str, list[float]] = defaultdict(list)
     for sim, area in zip(matched.tolist(), area_names):
         by_area[area].append(sim)
@@ -102,10 +116,10 @@ def main() -> None:
     print()
 
     print("Examples (dialect [area] -> best matching standard):")
-    # Cap retrieval demo size for speed on large datasets
+    # Only search among first K standards for speed (full NxN is huge)
     demo_n = min(5, len(dataset))
-    sub_d = dialect_mat[:demo_n]
-    sims = sub_d @ standard_mat.T
+    search_k = min(2000, len(dataset))
+    sims = dialect_mat[:demo_n] @ standard_mat[:search_k].T
     for i in range(demo_n):
         best_j = int(sims[i].argmax().item())
         d_text, _, area = dataset.pairs[i]
