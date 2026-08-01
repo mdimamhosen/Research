@@ -1,18 +1,2 @@
 # Local-only / large data — do not push
 Varsity/
-EDGE
-MARVIS
-images/
-outputs/
-data/
-*.csv
-*.png
-*.jpg
-*.jpeg
-*.pt
-*.pth
-*.ckpt
-__pycache__/
-.env
-.venv/
-venv/

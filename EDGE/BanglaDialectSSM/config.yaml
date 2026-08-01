@@ -1,0 +1,43 @@
+# ============================================================
+# Project settings (edit here — no need to change Python code)
+# ============================================================
+
+# Paths (relative to project root)
+paths:
+  raw_pairs: corpus/raw/pairs.tsv
+  processed_pairs: corpus/processed/pairs.tsv
+  vocab_file: corpus/processed/vocab.json
+  checkpoint_dir: checkpoints
+
+# Tokenizer
+tokenizer:
+  pad_token: "<PAD>"
+  unk_token: "<UNK>"
+  max_length: 32
+
+# Toy SSM / RNN encoder (placeholder for real Mamba later)
+model:
+  embedding_dim: 64
+  hidden_dim: 64
+  num_layers: 1
+  dropout: 0.1
+
+# Training
+training:
+  batch_size: 32
+  learning_rate: 0.001
+  epochs: 3
+  seed: 42
+
+# Dialect areas (see src/regions.py for full list + aliases)
+# TSV column 3 examples: sylheti | chittagonian | barishal | noakhali | unspecified
+areas:
+  - unspecified
+  - standard
+  - sylheti
+  - chittagonian
+  - barishal
+  - noakhali
+  - mymensingh
+  - rangpur
+  - rajshahi
