@@ -19,25 +19,29 @@ EngineName = str
 ProgressCallback = Callable[[int, int, int], None]  # page_number, index, total
 
 
-ENGINES = ("gemini", "openai", "claude", "tesseract")
+ENGINES = ("tesseract", "paddle", "gemini", "openai", "claude")
+OPEN_SOURCE_ENGINES = ("tesseract", "paddle")
 
 
 def resolve_default_engine() -> EngineName:
+    """Prefer open-source local engines for the automated CLI pipeline."""
     forced = (os.getenv("OCR_ENGINE") or "").strip().lower()
     if forced in ENGINES:
         return forced
-    if os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"):
-        return "gemini"
-    if os.getenv("OPENAI_API_KEY"):
-        return "openai"
-    if os.getenv("ANTHROPIC_API_KEY"):
-        return "claude"
     return "tesseract"
 
 
 def _ocr_fn(engine: EngineName) -> Callable[[Image.Image], str]:
-    """Lazy-import backends so missing optional deps don't break app startup."""
+    """Lazy-import backends so missing optional deps don't break startup."""
     engine = engine.lower().strip()
+    if engine == "tesseract":
+        from src.ocr_tesseract import ocr_page_tesseract
+
+        return ocr_page_tesseract
+    if engine == "paddle":
+        from src.ocr_paddle import ocr_page_paddle
+
+        return ocr_page_paddle
     if engine == "gemini":
         from src.ocr_gemini import ocr_page_gemini
 
@@ -50,10 +54,6 @@ def _ocr_fn(engine: EngineName) -> Callable[[Image.Image], str]:
         from src.ocr_claude import ocr_page_claude
 
         return ocr_page_claude
-    if engine == "tesseract":
-        from src.ocr_tesseract import ocr_page_tesseract
-
-        return ocr_page_tesseract
     raise ValueError(f"Unknown engine '{engine}'. Choose from: {', '.join(ENGINES)}")
 
 
@@ -166,6 +166,7 @@ def unique_path(directory: Path | str, stem: str, suffix: str) -> Path:
 
 __all__ = [
     "ENGINES",
+    "OPEN_SOURCE_ENGINES",
     "count_pages",
     "discover_pdfs",
     "iter_ocr_pages",

@@ -25,10 +25,11 @@ PDF_DIR = ROOT / "data" / "pdfs"
 TXT_DIR = ROOT / "data" / "txt"
 
 ENGINE_HELP = {
-    "tesseract": "Free · local · no API key",
-    "gemini": "Cloud · needs GEMINI_API_KEY",
-    "openai": "Cloud · needs OPENAI_API_KEY",
-    "claude": "Cloud · needs ANTHROPIC_API_KEY",
+    "tesseract": "Open source · free · local",
+    "paddle": "Open source · free · local (pip install -r requirements-paddle.txt)",
+    "gemini": "Cloud VLM · needs GEMINI_API_KEY",
+    "openai": "Cloud VLM · needs OPENAI_API_KEY",
+    "claude": "Cloud VLM · needs ANTHROPIC_API_KEY",
 }
 
 

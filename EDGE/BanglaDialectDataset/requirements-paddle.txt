@@ -1,0 +1,9 @@
+# Optional: PaddleOCR open-source engine
+# Install AFTER requirements.txt
+#
+# CPU (Windows/Linux example — check https://www.paddlepaddle.org.cn for your OS):
+#   pip install paddlepaddle
+#   pip install paddleocr
+#
+paddleocr>=2.7.0
+numpy>=1.26.0

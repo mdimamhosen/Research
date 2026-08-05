@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Batch CLI: scanned Bengali PDF → UTF-8 .txt."""
+"""Automated CLI: scanned Bengali PDFs → UTF-8 .txt (open-source OCR by default)."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from tqdm import tqdm
 
 from src.pipeline import (
     ENGINES,
+    OPEN_SOURCE_ENGINES,
     discover_pdfs,
     ocr_pdf_to_file,
     resolve_default_engine,
@@ -29,42 +30,60 @@ if hasattr(sys.stderr, "reconfigure"):
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="OCR scanned Bengali book PDFs to UTF-8 .txt files."
+        prog="cli.py",
+        description=(
+            "Batch-OCR scanned Bengali book PDFs into UTF-8 .txt files. "
+            "Default engines are open-source (tesseract, paddle)."
+        ),
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
         "--input",
         "-i",
         type=Path,
         default=ROOT / "data" / "pdfs",
-        help="PDF file or directory of PDFs (default: data/pdfs)",
+        help="PDF file or directory of PDFs",
     )
     parser.add_argument(
         "--output",
         "-o",
         type=Path,
         default=ROOT / "data" / "txt",
-        help="Output directory for .txt files (default: data/txt)",
+        help="Output directory for .txt files",
     )
     parser.add_argument(
         "--engine",
         "-e",
         choices=ENGINES,
         default=None,
-        help="OCR engine (default: openai if key set, else claude, else tesseract)",
+        help=(
+            "OCR engine. Open-source: "
+            + ", ".join(OPEN_SOURCE_ENGINES)
+            + ". Default from OCR_ENGINE env or tesseract."
+        ),
     )
-    parser.add_argument("--dpi", type=int, default=300, help="Render DPI (default: 300)")
+    parser.add_argument("--dpi", type=int, default=300, help="PDF render DPI")
     parser.add_argument("--page-start", type=int, default=None, help="First page (1-based)")
     parser.add_argument("--page-end", type=int, default=None, help="Last page (1-based)")
     parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Skip PDFs that already have output/<stem>.txt (resume-friendly automation)",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
-        help="Overwrite existing .txt with the same name (default: write book_2.txt, …)",
+        help="Overwrite output/<stem>.txt if it exists",
     )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.force and args.skip_existing:
+        print("Error: use only one of --force or --skip-existing", file=sys.stderr)
+        return 2
+
     engine = args.engine or resolve_default_engine()
 
     try:
@@ -78,16 +97,29 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     args.output.mkdir(parents=True, exist_ok=True)
-    print(f"Engine: {engine} | DPI: {args.dpi} | PDFs: {len(pdfs)}")
+    print(
+        f"Engine: {engine} | DPI: {args.dpi} | PDFs: {len(pdfs)} | "
+        f"open-source default: {engine in OPEN_SOURCE_ENGINES}"
+    )
+
+    ok = skipped = failed = 0
 
     for pdf in pdfs:
+        exact = args.output / f"{pdf.stem}.txt"
+        if args.skip_existing and exact.exists():
+            print(f"Skip (exists): {exact.name}")
+            skipped += 1
+            continue
+
         if args.force:
-            out = args.output / f"{pdf.stem}.txt"
-        else:
+            out = exact
+        elif exact.exists():
             out = unique_path(args.output, pdf.stem, ".txt")
+        else:
+            out = exact
 
         print(f"Processing: {pdf.name} → {out.name}")
-        with tqdm(desc=pdf.stem, unit="page") as bar:
+        with tqdm(desc=pdf.stem[:40], unit="page") as bar:
 
             def on_progress(page_number: int, idx: int, total: int) -> None:
                 bar.total = total
@@ -106,13 +138,16 @@ def main(argv: list[str] | None = None) -> int:
                     on_progress=on_progress,
                     force=True,
                 )
-            except Exception as exc:  # noqa: BLE001 — surface to user, continue batch
+            except Exception as exc:  # noqa: BLE001
                 print(f"\nFailed {pdf.name}: {exc}", file=sys.stderr)
+                failed += 1
                 continue
 
         print(f"Wrote: {out}")
+        ok += 1
 
-    return 0
+    print(f"\nDone. ok={ok} skipped={skipped} failed={failed}")
+    return 1 if failed and not ok else 0
 
 
 if __name__ == "__main__":

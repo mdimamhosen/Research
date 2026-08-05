@@ -1,182 +1,73 @@
-# BanglaDialectDataset — Bengali Book OCR
+# BanglaDialectDataset — Bengali Book OCR (CLI-first)
 
-Tool to OCR scanned Bengali (Bangla) book PDFs and save plain UTF-8 `.txt` files for the BanglaDialectDataset paper contribution.
+Automated tool to OCR scanned Bengali (Bangla) book PDFs into UTF-8 `.txt` files for the dataset paper.
 
-No machine-learning training is required to run this tool.
+**Primary interface: CLI.** Open-source engines by default (`tesseract`, optional `paddle`). No paid API required. Python is the intentional language choice.
 
-- [GUIDE.md](GUIDE.md) — full walkthrough of how the tool was built (architecture, modules, Cloud deploy)
+Optional Streamlit UI is for demos only (`requirements-ui.txt`).
 
-## Pipeline & data flow
-
-```mermaid
-flowchart LR
-  User[User] --> UI[app.py Streamlit]
-  User --> CLI[cli.py]
-  UI --> Pipeline[pipeline.py]
-  CLI --> Pipeline
-  Pipeline --> Render[pdf_pages.py]
-  Render --> Pages[Page images]
-  Pages --> Engine{OCR engine}
-  Engine -->|default| Gemini[ocr_gemini.py]
-  Engine --> OpenAI[ocr_openai.py]
-  Engine --> Claude[ocr_claude.py]
-  Engine --> Tess[ocr_tesseract.py]
-  Gemini --> Prompt[ocr_common.py]
-  OpenAI --> Prompt
-  Claude --> Prompt
-  Gemini --> Raw[Page text]
-  OpenAI --> Raw
-  Claude --> Raw
-  Tess --> Raw
-  Raw --> Norm[normalize.py]
-  Norm --> TXT[UTF-8 .txt]
-```
-
-```mermaid
-flowchart TB
-  PDF[Scanned PDF] --> Render[Render pages at DPI]
-  Render --> Img["list of page_number, PIL.Image"]
-  Img --> OCR["ocr_page_*(image) -> str"]
-  OCR --> Pairs["list of page_number, text"]
-  Pairs --> Join[join_pages NFC + markers]
-  Join --> Out["data/txt/book.txt"]
-```
-
-## Features
-
-- **Streamlit UI** for upload / folder batch OCR
-- **CLI** for reproducible batch runs
-- Engines:
-  - `gemini` — Gemini 2.0 Flash vision (**default** when `GEMINI_API_KEY` is set)
-  - `openai` — GPT-4o vision (optional)
-  - `claude` — Claude vision (optional)
-  - `tesseract` — local Bengali+English OCR (offline fallback)
-- Output: one UTF-8 NFC-normalized `.txt` per PDF, with `--- page N ---` markers
-
-## Setup
+## Quick start (CLI)
 
 ```bash
 cd EDGE/BanglaDialectDataset
 py -3.13 -m venv .venv
-# Windows Git Bash / PowerShell:
-source .venv/Scripts/activate   # or: .venv\Scripts\Activate.ps1
+.venv/Scripts/activate          # Windows
 pip install -r requirements.txt
+
+# Install Tesseract OS package once:
+#   winget install UB-Mannheim.TesseractOCR
+# Bengali model files live in ./tessdata/ (ben + eng)
+
+# Drop PDFs here, then run:
+python cli.py -i data/pdfs -o data/txt --engine tesseract --skip-existing
 ```
 
-On Git Bash, `streamlit` may still resolve to Anaconda. Prefer the venv explicitly:
+### Useful CLI flags
 
 ```bash
-.venv/Scripts/python -m streamlit run app.py
+# Resume a large corpus (skip books that already have .txt)
+python cli.py -i data/pdfs -o data/txt --engine tesseract --skip-existing
+
+# Overwrite same-named outputs
+python cli.py -i data/pdfs -o data/txt --engine tesseract --force
+
+# Smoke-test a few pages
+python cli.py -i data/pdfs/book.pdf -o data/txt --page-start 1 --page-end 3
+
+# Optional open-source alternative (after requirements-paddle.txt)
+python cli.py -i data/pdfs -o data/txt --engine paddle --skip-existing
 ```
 
-Copy `.env.example` to `.env` and set keys:
+## Engines
 
-```bash
-# OPENAI_API_KEY=sk-...
-# ANTHROPIC_API_KEY=sk-ant-...
-GEMINI_API_KEY=your-gemini-api-key
+| Engine | License / cost | Notes |
+|--------|----------------|-------|
+| `tesseract` | Open source · **default** | Local CLI; needs `ben` language data |
+| `paddle` | Open source · optional | `pip install -r requirements-paddle.txt` |
+| `gemini` / `openai` / `claude` | Paid APIs · optional | Not part of the default paper pipeline |
+
+Default resolution: `OCR_ENGINE` in `.env`, else **`tesseract`**.
+
+## Layout
+
+```text
+BanglaDialectDataset/
+  cli.py                 # ← main automated entrypoint
+  app.py                 # optional Streamlit demo
+  requirements.txt       # CLI core
+  requirements-paddle.txt
+  requirements-ui.txt
+  src/
+    pipeline.py
+    pdf_pages.py
+    ocr_tesseract.py
+    ocr_paddle.py
+    normalize.py
+    ...
+  data/pdfs/             # input books
+  data/txt/              # UTF-8 outputs
+  tessdata/              # Tesseract ben/eng models
 ```
-### Optional: Tesseract (offline / free — recommended default)
-
-Tesseract is already set up for this project if you installed it:
-
-1. Install engine: `winget install UB-Mannheim.TesseractOCR`
-2. Bengali data lives in `tessdata/ben.traineddata` (already downloaded here)
-3. In Streamlit, choose engine **`tesseract`** (default when no cloud API keys are in `.env`)
-
-No API key needed.
-
-## Usage
-
-### Streamlit
-
-```bash
-.venv/Scripts/python -m streamlit run app.py
-```
-
-Do **not** run bare `streamlit run app.py` if Anaconda is on your PATH — it will miss project deps.
-- Upload PDFs, or drop files into `data/pdfs/` and use **Process folder**
-- Results land in `data/txt/` — each upload gets its own file (`book.txt`, or `book_2.txt` if the name exists)
-- PDFs are also stored uniquely under `data/pdfs/` so a big dataset never overwrites older books
-
-### CLI
-
-```bash
-python cli.py --input data/pdfs --output data/txt --engine tesseract
-python cli.py -i book.pdf -o data/txt --engine tesseract --force
-python cli.py -i book.pdf -o data/txt --page-start 1 --page-end 5
-```
-
-By default the CLI writes a **new** numbered `.txt` if the name exists. Use `--force` to overwrite.
-
-## Deploy to Streamlit Community Cloud
-
-### What you need
-
-1. **GitHub repo** with this code pushed (e.g. `mdimamhosen/Research`)
-2. A free account at [share.streamlit.io](https://share.streamlit.io) linked to GitHub
-3. **Do not** commit `.env` or book PDFs
-
-### Deploy form
-
-| Field | Value |
-|-------|--------|
-| Repository | `mdimamhosen/Research` |
-| Branch | `main` |
-| Main file path | `EDGE/BanglaDialectDataset/app.py` (use `/`, not `\`) |
-| App URL | e.g. `bangla-book-ocr` |
-| Python version (Advanced) | **3.12** (avoid 3.14 — Cloud may pick it and break deps) |
-
-### If the app returns 500 / `GZipResponder` / `thread_minimum_size`
-
-Cloud installed Starlette 1.4 which is incompatible with current Streamlit. Our `requirements.txt` pins `starlette<1.4.0`. Reboot the app after pushing that change.
-
-### Files Cloud uses
-
-- [`requirements.txt`](requirements.txt) — Python packages (next to `app.py`)
-- **[`packages.txt`](../../packages.txt) at repo root** — installs system Tesseract + Bengali on Linux Cloud  
-  (Streamlit only auto-installs apt packages from the **repository root**, not the app subfolder.)
-
-### Secrets (Cloud)
-
-```toml
-OCR_ENGINE = "tesseract"
-```
-
-Do **not** put a Windows path like `TESSERACT_CMD=C:\Program Files\...` in Cloud Secrets — that only works on your PC.
-
-### Fix “Tesseract binary not found” on Cloud
-
-1. Ensure `packages.txt` exists at the **repo root** (`Research/packages.txt`) with:
-   ```text
-   tesseract-ocr
-   tesseract-ocr-ben
-   tesseract-ocr-eng
-   ```
-2. Commit and **push** to `main`
-3. Streamlit Cloud → your app → **Manage app** (⋮) → **Reboot app**  
-   (or delete + redeploy if reboot isn’t enough)
-4. In the build logs, look for apt / `tesseract` install lines
-5. Open the app — sidebar should say **Engine status · ready**
-
-Local Windows still uses your installed Tesseract + `.env` `TESSERACT_CMD`.
-
-### Important Cloud limits
-
-- **Uploads are temporary** on free Cloud — download `.txt` results; don’t treat Cloud disk as your database
-- Keep the real corpus locally / in Drive / Git LFS, not only on Streamlit Cloud
-- Long 90-page books may hit timeouts; prefer **local CLI** for full books, Cloud for demos/short runs
-- Push `tessdata/ben.traineddata` **or** rely on `packages.txt` (`tesseract-ocr-ben`). `packages.txt` is enough on Cloud Linux
-
-### Before first deploy
-
-```bash
-git add EDGE/BanglaDialectDataset
-git commit -m "Add Bangla book OCR tool"
-git push origin main
-```
-
-Then open Streamlit Cloud → New app → fill the form above → Deploy.
 
 ## Output format
 
@@ -190,32 +81,24 @@ Then open Streamlit Cloud → New app → fill the form above → Deploy.
 <extracted text>
 ```
 
-- Encoding: UTF-8
-- Normalization: Unicode NFC; collapsed runaway whitespace
-- Bangla script, Latin, digits, and punctuation (including `।`) are preserved
+- Encoding: UTF-8 · Unicode NFC
+- One `.txt` per book; `--skip-existing` for safe re-runs on a large corpus
+
+## Optional UI
+
+```bash
+pip install -r requirements-ui.txt
+.venv/Scripts/python -m streamlit run app.py
+```
 
 ## Methods blurb (paper)
 
-> Scanned Bengali book PDFs were rendered to page images with PyMuPDF at 300 DPI. Text was extracted with a vision-language model (Google Gemini 2.0 Flash by default; optionally OpenAI GPT-4o or Anthropic Claude) prompted for verbatim OCR without translation or correction. A local Tesseract (`ben+eng`) path was retained as an offline baseline. Outputs were written as UTF-8 plain text with Unicode NFC normalization and explicit page markers.
+> Scanned Bengali book PDFs were rendered with PyMuPDF (300 DPI) and transcribed with open-source OCR (Tesseract `ben+eng`; optionally PaddleOCR). Processing was automated via a command-line batch pipeline producing UTF-8 plain text with Unicode NFC normalization and page markers. No commercial vision API was required for the core corpus.
 
-## Layout
+## Why Python
 
-```text
-BanglaDialectDataset/
-  app.py              # Streamlit UI
-  cli.py              # batch CLI
-  requirements.txt
-  .env.example
-  src/
-    pdf_pages.py
-    ocr_openai.py
-    ocr_claude.py
-    ocr_tesseract.py
-    normalize.py
-    pipeline.py
-  data/
-    pdfs/             # drop scanned books here
-    txt/              # OCR outputs
-```
+OCR libraries for Bangla (Tesseract bindings, PaddleOCR, PDF rendering) are Python-first. The contribution is an engineering pipeline, not a new ML model — Python keeps the stack small and reproducible.
 
-`data/pdfs/**` and `data/txt/**` are gitignored (except `.gitkeep`). Never commit `.env`.
+## Docs
+
+- [GUIDE.md](GUIDE.md) — module relations and data flow
