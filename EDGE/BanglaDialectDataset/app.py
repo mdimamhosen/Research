@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -545,11 +544,13 @@ def _run_one(
         status.caption(f"OCR in progress · page {page_number}")
 
     text = ""
+    tmp_path: Path | None = None
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", suffix=".txt", delete=False
-        ) as tmp:
-            tmp_path = Path(tmp.name)
+        # Write temp file in the SAME directory as the output.
+        # Path.replace()/rename fails on Streamlit Cloud (Errno 18) when
+        # moving from /tmp to /mount/src (cross-device).
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = out_path.parent / f".{out_path.stem}.partial.txt"
 
         text = ocr_pdf_to_text(
             pdf_path,
@@ -560,12 +561,17 @@ def _run_one(
             on_progress=on_progress,
         )
         tmp_path.write_text(text, encoding="utf-8")
-        out_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path.replace(out_path)
+        tmp_path = None
     except Exception as exc:  # noqa: BLE001
         st.error(f"Failed `{pdf_path.name}`: {exc}")
         return
     finally:
+        if tmp_path is not None and tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
         progress.progress(1.0, text="Complete")
         status.empty()
 
