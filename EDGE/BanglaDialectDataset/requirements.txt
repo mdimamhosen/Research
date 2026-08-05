@@ -1,9 +1,10 @@
-streamlit>=1.32.0
+streamlit>=1.32.0,<1.62
+# Streamlit 1.61 breaks with Starlette 1.4.0 (GZipResponder thread_minimum_size)
+starlette>=0.46.0,<1.4.0
 pymupdf>=1.24.0
 Pillow>=10.0.0
 google-genai>=1.0.0
 openai>=1.40.0
 anthropic>=0.34.0
 python-dotenv>=1.0.0
-pytesseract>=0.3.10
 tqdm>=4.66.0

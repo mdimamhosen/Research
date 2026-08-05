@@ -125,6 +125,11 @@ By default the CLI writes a **new** numbered `.txt` if the name exists. Use `--f
 | Branch | `main` |
 | Main file path | `EDGE/BanglaDialectDataset/app.py` (use `/`, not `\`) |
 | App URL | e.g. `bangla-book-ocr` |
+| Python version (Advanced) | **3.12** (avoid 3.14 — Cloud may pick it and break deps) |
+
+### If the app returns 500 / `GZipResponder` / `thread_minimum_size`
+
+Cloud installed Starlette 1.4 which is incompatible with current Streamlit. Our `requirements.txt` pins `starlette<1.4.0`. Reboot the app after pushing that change.
 
 ### Files Cloud uses
 
