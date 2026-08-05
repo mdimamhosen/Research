@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# Large Tesseract language models (keep README)
+tessdata/*.traineddata
+
 # Python
 .venv/
 venv/

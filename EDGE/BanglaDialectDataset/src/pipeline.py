@@ -23,6 +23,9 @@ ENGINES = ("gemini", "openai", "claude", "tesseract")
 
 
 def resolve_default_engine() -> EngineName:
+    forced = (os.getenv("OCR_ENGINE") or "").strip().lower()
+    if forced in ENGINES:
+        return forced
     if os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"):
         return "gemini"
     if os.getenv("OPENAI_API_KEY"):
@@ -141,6 +144,26 @@ def discover_pdfs(input_path: Path | str) -> list[Path]:
     raise FileNotFoundError(f"Input not found: {path}")
 
 
+def unique_path(directory: Path | str, stem: str, suffix: str) -> Path:
+    """Return directory/stem.suffix, or stem_2.suffix, stem_3.suffix, ... if taken.
+
+    Ensures each new book/upload gets its own file for a growing dataset.
+    """
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    if not suffix.startswith("."):
+        suffix = f".{suffix}"
+    candidate = directory / f"{stem}{suffix}"
+    if not candidate.exists():
+        return candidate
+    n = 2
+    while True:
+        candidate = directory / f"{stem}_{n}{suffix}"
+        if not candidate.exists():
+            return candidate
+        n += 1
+
+
 __all__ = [
     "ENGINES",
     "count_pages",
@@ -149,4 +172,5 @@ __all__ = [
     "ocr_pdf_to_file",
     "ocr_pdf_to_text",
     "resolve_default_engine",
+    "unique_path",
 ]

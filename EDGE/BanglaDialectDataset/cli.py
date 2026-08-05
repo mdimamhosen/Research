@@ -18,6 +18,7 @@ from src.pipeline import (
     discover_pdfs,
     ocr_pdf_to_file,
     resolve_default_engine,
+    unique_path,
 )
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -57,7 +58,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Overwrite existing .txt files",
+        help="Overwrite existing .txt with the same name (default: write book_2.txt, …)",
     )
     return parser
 
@@ -80,10 +81,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Engine: {engine} | DPI: {args.dpi} | PDFs: {len(pdfs)}")
 
     for pdf in pdfs:
-        out = args.output / f"{pdf.stem}.txt"
-        if out.exists() and not args.force:
-            print(f"Skip (exists): {out.name}")
-            continue
+        if args.force:
+            out = args.output / f"{pdf.stem}.txt"
+        else:
+            out = unique_path(args.output, pdf.stem, ".txt")
 
         print(f"Processing: {pdf.name} → {out.name}")
         with tqdm(desc=pdf.stem, unit="page") as bar:

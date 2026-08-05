@@ -76,11 +76,15 @@ Copy `.env.example` to `.env` and set keys:
 # ANTHROPIC_API_KEY=sk-ant-...
 GEMINI_API_KEY=your-gemini-api-key
 ```
-### Optional: Tesseract (offline)
+### Optional: Tesseract (offline / free — recommended default)
 
-1. Install [Tesseract for Windows](https://github.com/UB-Mannheim/tesseract/wiki)
-2. Include the **Bengali (`ben`)** language pack (and English)
-3. Ensure `tesseract` is on your `PATH`
+Tesseract is already set up for this project if you installed it:
+
+1. Install engine: `winget install UB-Mannheim.TesseractOCR`
+2. Bengali data lives in `tessdata/ben.traineddata` (already downloaded here)
+3. In Streamlit, choose engine **`tesseract`** (default when no cloud API keys are in `.env`)
+
+No API key needed.
 
 ## Usage
 
@@ -92,18 +96,73 @@ GEMINI_API_KEY=your-gemini-api-key
 
 Do **not** run bare `streamlit run app.py` if Anaconda is on your PATH — it will miss project deps.
 - Upload PDFs, or drop files into `data/pdfs/` and use **Process folder**
-- Results land in `data/txt/<book>.txt`
+- Results land in `data/txt/` — each upload gets its own file (`book.txt`, or `book_2.txt` if the name exists)
+- PDFs are also stored uniquely under `data/pdfs/` so a big dataset never overwrites older books
 
 ### CLI
 
 ```bash
-python cli.py --input data/pdfs --output data/txt --engine gemini
-python cli.py -i book.pdf -o data/txt --engine openai --dpi 300
-python cli.py -i book.pdf -o data/txt --engine claude
-python cli.py -i data/pdfs -o data/txt --engine tesseract --force
+python cli.py --input data/pdfs --output data/txt --engine tesseract
+python cli.py -i book.pdf -o data/txt --engine tesseract --force
 python cli.py -i book.pdf -o data/txt --page-start 1 --page-end 5
 ```
-Existing `.txt` files are skipped unless `--force` / “Overwrite existing” is set.
+
+By default the CLI writes a **new** numbered `.txt` if the name exists. Use `--force` to overwrite.
+
+## Deploy to Streamlit Community Cloud
+
+### What you need
+
+1. **GitHub repo** with this code pushed (e.g. `mdimamhosen/Research`)
+2. A free account at [share.streamlit.io](https://share.streamlit.io) linked to GitHub
+3. **Do not** commit `.env` or book PDFs
+
+### Deploy form
+
+| Field | Value |
+|-------|--------|
+| Repository | `mdimamhosen/Research` |
+| Branch | `main` |
+| Main file path | `EDGE/BanglaDialectDataset/app.py` (use `/`, not `\`) |
+| App URL | e.g. `bangla-book-ocr` |
+
+### Files Cloud uses
+
+- [`requirements.txt`](requirements.txt) — Python packages  
+- [`packages.txt`](packages.txt) — installs system Tesseract + Bengali on Linux Cloud VMs  
+
+### Secrets (only if using paid VLMs)
+
+App settings → Secrets:
+
+```toml
+OCR_ENGINE = "tesseract"
+# GEMINI_API_KEY = "..."
+# OPENAI_API_KEY = "..."
+```
+
+For free Tesseract-only deploy you can leave Secrets empty and set nothing — default is tesseract when no cloud keys exist. Optional:
+
+```toml
+OCR_ENGINE = "tesseract"
+```
+
+### Important Cloud limits
+
+- **Uploads are temporary** on free Cloud — download `.txt` results; don’t treat Cloud disk as your database
+- Keep the real corpus locally / in Drive / Git LFS, not only on Streamlit Cloud
+- Long 90-page books may hit timeouts; prefer **local CLI** for full books, Cloud for demos/short runs
+- Push `tessdata/ben.traineddata` **or** rely on `packages.txt` (`tesseract-ocr-ben`). `packages.txt` is enough on Cloud Linux
+
+### Before first deploy
+
+```bash
+git add EDGE/BanglaDialectDataset
+git commit -m "Add Bangla book OCR tool"
+git push origin main
+```
+
+Then open Streamlit Cloud → New app → fill the form above → Deploy.
 
 ## Output format
 

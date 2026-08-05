@@ -19,6 +19,7 @@ from src.pipeline import (
     discover_pdfs,
     ocr_pdf_to_text,
     resolve_default_engine,
+    unique_path,
 )
 
 PDF_DIR = ROOT / "data" / "pdfs"
@@ -26,10 +27,20 @@ TXT_DIR = ROOT / "data" / "txt"
 
 
 def _save_upload(uploaded) -> Path:
+    """Save upload under a unique name so books never overwrite each other."""
     PDF_DIR.mkdir(parents=True, exist_ok=True)
-    dest = PDF_DIR / uploaded.name
+    stem = Path(uploaded.name).stem
+    dest = unique_path(PDF_DIR, stem, ".pdf")
     dest.write_bytes(uploaded.getbuffer())
     return dest
+
+
+def _txt_path_for(pdf_path: Path, *, overwrite: bool) -> Path:
+    """One PDF → one .txt; if name taken, create book_2.txt unless overwrite."""
+    TXT_DIR.mkdir(parents=True, exist_ok=True)
+    if overwrite:
+        return TXT_DIR / f"{pdf_path.stem}.txt"
+    return unique_path(TXT_DIR, pdf_path.stem, ".txt")
 
 
 def main() -> None:
@@ -48,11 +59,15 @@ def main() -> None:
             index=list(ENGINES).index(default_engine),
         )
         dpi = st.slider("Render DPI", min_value=150, max_value=400, value=300, step=50)
-        force = st.checkbox("Overwrite existing .txt", value=False)
+        overwrite = st.checkbox(
+            "Overwrite same-name .txt",
+            value=False,
+            help="Off (default): if book.txt exists, write book_2.txt, book_3.txt, …",
+        )
         st.markdown("---")
         st.markdown(
-            "Keys load from `.env` (`GEMINI_API_KEY`, optional `OPENAI_API_KEY` / "
-            "`ANTHROPIC_API_KEY`). Tesseract needs the `ben` language pack installed locally."
+            "Free engine: **tesseract** (no API key). "
+            "Each upload gets its **own** `.txt` (numbered if the name already exists)."
         )
 
     tab_upload, tab_folder = st.tabs(["Upload PDF", "Process folder"])
@@ -74,12 +89,9 @@ def main() -> None:
                 )
 
         if st.button("Run OCR on upload", type="primary", disabled=not uploaded):
-            TXT_DIR.mkdir(parents=True, exist_ok=True)
-            # Page-range runs are usually test re-runs — overwrite by default.
-            run_force = force or (page_start is not None or page_end is not None)
             for file in uploaded or []:
                 pdf_path = _save_upload(file)
-                out_path = TXT_DIR / f"{pdf_path.stem}.txt"
+                out_path = _txt_path_for(pdf_path, overwrite=overwrite)
                 _run_one(
                     pdf_path,
                     out_path,
@@ -87,14 +99,16 @@ def main() -> None:
                     dpi=dpi,
                     page_start=page_start,
                     page_end=page_end,
-                    force=run_force,
                 )
 
     with tab_folder:
         st.write(f"Looks for PDFs in `{PDF_DIR}`")
+        st.caption(
+            "Processes each PDF. If `book.txt` already exists, creates `book_2.txt` "
+            "(unless overwrite is on)."
+        )
         if st.button("Run OCR on folder", type="primary"):
             PDF_DIR.mkdir(parents=True, exist_ok=True)
-            TXT_DIR.mkdir(parents=True, exist_ok=True)
             try:
                 pdfs = discover_pdfs(PDF_DIR)
             except FileNotFoundError:
@@ -104,7 +118,7 @@ def main() -> None:
                 st.warning("No PDFs in data/pdfs/. Drop files there or use Upload.")
                 return
             for pdf_path in pdfs:
-                out_path = TXT_DIR / f"{pdf_path.stem}.txt"
+                out_path = _txt_path_for(pdf_path, overwrite=overwrite)
                 _run_one(
                     pdf_path,
                     out_path,
@@ -112,7 +126,6 @@ def main() -> None:
                     dpi=dpi,
                     page_start=None,
                     page_end=None,
-                    force=force,
                 )
 
 
@@ -124,29 +137,16 @@ def _run_one(
     dpi: int,
     page_start: int | None,
     page_end: int | None,
-    force: bool,
 ) -> None:
-    if out_path.exists() and not force:
-        st.warning(
-            f"Skipped (exists): `{out_path.name}`. "
-            "In the **sidebar**, enable **Overwrite existing .txt**, then run again."
-        )
-        st.download_button(
-            f"Download {out_path.name}",
-            data=out_path.read_text(encoding="utf-8"),
-            file_name=out_path.name,
-            mime="text/plain",
-            key=f"dl-skip-{out_path.name}",
-        )
-        return
-
     try:
         n_pages = count_pages(pdf_path)
     except Exception as exc:  # noqa: BLE001
         st.error(f"Cannot open {pdf_path.name}: {exc}")
         return
 
-    st.write(f"**{pdf_path.name}** — {n_pages} page(s), engine=`{engine}`")
+    st.write(
+        f"**{pdf_path.name}** — {n_pages} page(s), engine=`{engine}` → `{out_path.name}`"
+    )
     progress = st.progress(0.0, text="Starting…")
     status = st.empty()
 
@@ -154,8 +154,8 @@ def _run_one(
         progress.progress(idx / total, text=f"Page {page_number} ({idx}/{total})")
         status.caption(f"OCR page {page_number}…")
 
+    text = ""
     try:
-        # Use a temp file then move so partial failures don't leave bad outputs
         with tempfile.NamedTemporaryFile(
             mode="w", encoding="utf-8", suffix=".txt", delete=False
         ) as tmp:
