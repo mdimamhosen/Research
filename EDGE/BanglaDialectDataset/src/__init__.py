@@ -1,0 +1,1 @@
+"""BanglaDialectDataset OCR package."""
