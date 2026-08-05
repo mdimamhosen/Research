@@ -4,16 +4,52 @@ Tool to OCR scanned Bengali (Bangla) book PDFs and save plain UTF-8 `.txt` files
 
 No machine-learning training is required to run this tool.
 
-- [README.md](README.md) — quick setup and usage
 - [GUIDE.md](GUIDE.md) — full walkthrough of how the tool was built (architecture, modules, Cloud deploy)
+
+## Pipeline & data flow
+
+```mermaid
+flowchart LR
+  User[User] --> UI[app.py Streamlit]
+  User --> CLI[cli.py]
+  UI --> Pipeline[pipeline.py]
+  CLI --> Pipeline
+  Pipeline --> Render[pdf_pages.py]
+  Render --> Pages[Page images]
+  Pages --> Engine{OCR engine}
+  Engine -->|default| Gemini[ocr_gemini.py]
+  Engine --> OpenAI[ocr_openai.py]
+  Engine --> Claude[ocr_claude.py]
+  Engine --> Tess[ocr_tesseract.py]
+  Gemini --> Prompt[ocr_common.py]
+  OpenAI --> Prompt
+  Claude --> Prompt
+  Gemini --> Raw[Page text]
+  OpenAI --> Raw
+  Claude --> Raw
+  Tess --> Raw
+  Raw --> Norm[normalize.py]
+  Norm --> TXT[UTF-8 .txt]
+```
+
+```mermaid
+flowchart TB
+  PDF[Scanned PDF] --> Render[Render pages at DPI]
+  Render --> Img["list of page_number, PIL.Image"]
+  Img --> OCR["ocr_page_*(image) -> str"]
+  OCR --> Pairs["list of page_number, text"]
+  Pairs --> Join[join_pages NFC + markers]
+  Join --> Out["data/txt/book.txt"]
+```
 
 ## Features
 
 - **Streamlit UI** for upload / folder batch OCR
 - **CLI** for reproducible batch runs
 - Engines:
-  - `openai` — GPT-4o vision (default when `OPENAI_API_KEY` is set)
-  - `claude` — Claude vision (when `ANTHROPIC_API_KEY` is set)
+  - `gemini` — Gemini 2.0 Flash vision (**default** when `GEMINI_API_KEY` is set)
+  - `openai` — GPT-4o vision (optional)
+  - `claude` — Claude vision (optional)
   - `tesseract` — local Bengali+English OCR (offline fallback)
 - Output: one UTF-8 NFC-normalized `.txt` per PDF, with `--- page N ---` markers
 
@@ -36,10 +72,10 @@ On Git Bash, `streamlit` may still resolve to Anaconda. Prefer the venv explicit
 Copy `.env.example` to `.env` and set keys:
 
 ```bash
-OPENAI_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-ant-...   # optional
+# OPENAI_API_KEY=sk-...
+# ANTHROPIC_API_KEY=sk-ant-...
+GEMINI_API_KEY=your-gemini-api-key
 ```
-
 ### Optional: Tesseract (offline)
 
 1. Install [Tesseract for Windows](https://github.com/UB-Mannheim/tesseract/wiki)
@@ -61,12 +97,12 @@ Do **not** run bare `streamlit run app.py` if Anaconda is on your PATH — it wi
 ### CLI
 
 ```bash
-python cli.py --input data/pdfs --output data/txt --engine openai
-python cli.py -i book.pdf -o data/txt --engine claude --dpi 300
+python cli.py --input data/pdfs --output data/txt --engine gemini
+python cli.py -i book.pdf -o data/txt --engine openai --dpi 300
+python cli.py -i book.pdf -o data/txt --engine claude
 python cli.py -i data/pdfs -o data/txt --engine tesseract --force
 python cli.py -i book.pdf -o data/txt --page-start 1 --page-end 5
 ```
-
 Existing `.txt` files are skipped unless `--force` / “Overwrite existing” is set.
 
 ## Output format
@@ -87,7 +123,7 @@ Existing `.txt` files are skipped unless `--force` / “Overwrite existing” is
 
 ## Methods blurb (paper)
 
-> Scanned Bengali book PDFs were rendered to page images with PyMuPDF at 300 DPI. Text was extracted with a vision-language model (OpenAI GPT-4o; optionally Anthropic Claude) prompted for verbatim OCR without translation or correction. A local Tesseract (`ben+eng`) path was retained as an offline baseline. Outputs were written as UTF-8 plain text with Unicode NFC normalization and explicit page markers.
+> Scanned Bengali book PDFs were rendered to page images with PyMuPDF at 300 DPI. Text was extracted with a vision-language model (Google Gemini 2.0 Flash by default; optionally OpenAI GPT-4o or Anthropic Claude) prompted for verbatim OCR without translation or correction. A local Tesseract (`ben+eng`) path was retained as an offline baseline. Outputs were written as UTF-8 plain text with Unicode NFC normalization and explicit page markers.
 
 ## Layout
 

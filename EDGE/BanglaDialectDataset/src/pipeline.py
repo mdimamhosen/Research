@@ -19,10 +19,12 @@ EngineName = str
 ProgressCallback = Callable[[int, int, int], None]  # page_number, index, total
 
 
-ENGINES = ("openai", "claude", "tesseract")
+ENGINES = ("gemini", "openai", "claude", "tesseract")
 
 
 def resolve_default_engine() -> EngineName:
+    if os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"):
+        return "gemini"
     if os.getenv("OPENAI_API_KEY"):
         return "openai"
     if os.getenv("ANTHROPIC_API_KEY"):
@@ -33,6 +35,10 @@ def resolve_default_engine() -> EngineName:
 def _ocr_fn(engine: EngineName) -> Callable[[Image.Image], str]:
     """Lazy-import backends so missing optional deps don't break app startup."""
     engine = engine.lower().strip()
+    if engine == "gemini":
+        from src.ocr_gemini import ocr_page_gemini
+
+        return ocr_page_gemini
     if engine == "openai":
         from src.ocr_openai import ocr_page_openai
 
@@ -51,7 +57,7 @@ def _ocr_fn(engine: EngineName) -> Callable[[Image.Image], str]:
 def iter_ocr_pages(
     pdf_path: Path | str,
     *,
-    engine: EngineName = "openai",
+    engine: EngineName = "gemini",
     dpi: int = 300,
     page_start: int | None = None,
     page_end: int | None = None,
@@ -73,7 +79,7 @@ def iter_ocr_pages(
 def ocr_pdf_to_text(
     pdf_path: Path | str,
     *,
-    engine: EngineName = "openai",
+    engine: EngineName = "gemini",
     dpi: int = 300,
     page_start: int | None = None,
     page_end: int | None = None,
@@ -96,7 +102,7 @@ def ocr_pdf_to_file(
     pdf_path: Path | str,
     output_path: Path | str,
     *,
-    engine: EngineName = "openai",
+    engine: EngineName = "gemini",
     dpi: int = 300,
     page_start: int | None = None,
     page_end: int | None = None,

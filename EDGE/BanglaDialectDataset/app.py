@@ -36,7 +36,7 @@ def main() -> None:
     st.set_page_config(page_title="Bangla Book OCR", page_icon="📄", layout="wide")
     st.title("Bangla Book OCR")
     st.caption(
-        "Scan Bengali book PDFs → UTF-8 `.txt` via OpenAI, Claude, or Tesseract."
+        "Scan Bengali book PDFs → UTF-8 `.txt` via Gemini, OpenAI, Claude, or Tesseract."
     )
 
     with st.sidebar:
@@ -51,8 +51,8 @@ def main() -> None:
         force = st.checkbox("Overwrite existing .txt", value=False)
         st.markdown("---")
         st.markdown(
-            "Keys load from `.env` (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`). "
-            "Tesseract needs the `ben` language pack installed locally."
+            "Keys load from `.env` (`GEMINI_API_KEY`, optional `OPENAI_API_KEY` / "
+            "`ANTHROPIC_API_KEY`). Tesseract needs the `ben` language pack installed locally."
         )
 
     tab_upload, tab_folder = st.tabs(["Upload PDF", "Process folder"])
