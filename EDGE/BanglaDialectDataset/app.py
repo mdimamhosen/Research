@@ -75,6 +75,8 @@ def main() -> None:
 
         if st.button("Run OCR on upload", type="primary", disabled=not uploaded):
             TXT_DIR.mkdir(parents=True, exist_ok=True)
+            # Page-range runs are usually test re-runs — overwrite by default.
+            run_force = force or (page_start is not None or page_end is not None)
             for file in uploaded or []:
                 pdf_path = _save_upload(file)
                 out_path = TXT_DIR / f"{pdf_path.stem}.txt"
@@ -85,7 +87,7 @@ def main() -> None:
                     dpi=dpi,
                     page_start=page_start,
                     page_end=page_end,
-                    force=force,
+                    force=run_force,
                 )
 
     with tab_folder:
@@ -125,7 +127,10 @@ def _run_one(
     force: bool,
 ) -> None:
     if out_path.exists() and not force:
-        st.info(f"Skipped (exists): `{out_path.name}` — enable overwrite to re-run.")
+        st.warning(
+            f"Skipped (exists): `{out_path.name}`. "
+            "In the **sidebar**, enable **Overwrite existing .txt**, then run again."
+        )
         st.download_button(
             f"Download {out_path.name}",
             data=out_path.read_text(encoding="utf-8"),
