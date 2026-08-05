@@ -133,24 +133,33 @@ Cloud installed Starlette 1.4 which is incompatible with current Streamlit. Our 
 
 ### Files Cloud uses
 
-- [`requirements.txt`](requirements.txt) — Python packages  
-- [`packages.txt`](packages.txt) — installs system Tesseract + Bengali on Linux Cloud VMs  
+- [`requirements.txt`](requirements.txt) — Python packages (next to `app.py`)
+- **[`packages.txt`](../../packages.txt) at repo root** — installs system Tesseract + Bengali on Linux Cloud  
+  (Streamlit only auto-installs apt packages from the **repository root**, not the app subfolder.)
 
-### Secrets (only if using paid VLMs)
-
-App settings → Secrets:
-
-```toml
-OCR_ENGINE = "tesseract"
-# GEMINI_API_KEY = "..."
-# OPENAI_API_KEY = "..."
-```
-
-For free Tesseract-only deploy you can leave Secrets empty and set nothing — default is tesseract when no cloud keys exist. Optional:
+### Secrets (Cloud)
 
 ```toml
 OCR_ENGINE = "tesseract"
 ```
+
+Do **not** put a Windows path like `TESSERACT_CMD=C:\Program Files\...` in Cloud Secrets — that only works on your PC.
+
+### Fix “Tesseract binary not found” on Cloud
+
+1. Ensure `packages.txt` exists at the **repo root** (`Research/packages.txt`) with:
+   ```text
+   tesseract-ocr
+   tesseract-ocr-ben
+   tesseract-ocr-eng
+   ```
+2. Commit and **push** to `main`
+3. Streamlit Cloud → your app → **Manage app** (⋮) → **Reboot app**  
+   (or delete + redeploy if reboot isn’t enough)
+4. In the build logs, look for apt / `tesseract` install lines
+5. Open the app — sidebar should say **Engine status · ready**
+
+Local Windows still uses your installed Tesseract + `.env` `TESSERACT_CMD`.
 
 ### Important Cloud limits
 
