@@ -36,6 +36,10 @@ python cli.py -i data/pdfs/book.pdf -o data/txt --page-start 1 --page-end 3
 
 # Optional open-source alternative (after requirements-paddle.txt)
 python cli.py -i data/pdfs -o data/txt --engine paddle --skip-existing
+
+# DeepSeek-OCR open VLM (GPU recommended; smoke-test 1 page first)
+pip install -r requirements-deepseek.txt
+python cli.py -i data/pdfs/book.pdf -o data/txt --engine deepseek --page-start 1 --page-end 1
 ```
 
 ## Engines
@@ -44,6 +48,7 @@ python cli.py -i data/pdfs -o data/txt --engine paddle --skip-existing
 |--------|----------------|-------|
 | `tesseract` | Open source · **default** | Local CLI; needs `ben` language data |
 | `paddle` | Open source · optional | `pip install -r requirements-paddle.txt` |
+| `deepseek` | Open source VLM · optional | `pip install -r requirements-deepseek.txt` · GPU ~8GB+ VRAM |
 | `gemini` / `openai` / `claude` | Paid APIs · optional | Not part of the default paper pipeline |
 
 Default resolution: `OCR_ENGINE` in `.env`, else **`tesseract`**.

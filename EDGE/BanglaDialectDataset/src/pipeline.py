@@ -19,8 +19,8 @@ EngineName = str
 ProgressCallback = Callable[[int, int, int], None]  # page_number, index, total
 
 
-ENGINES = ("tesseract", "paddle", "gemini", "openai", "claude")
-OPEN_SOURCE_ENGINES = ("tesseract", "paddle")
+ENGINES = ("tesseract", "paddle", "deepseek", "gemini", "openai", "claude")
+OPEN_SOURCE_ENGINES = ("tesseract", "paddle", "deepseek")
 
 
 def resolve_default_engine() -> EngineName:
@@ -42,6 +42,10 @@ def _ocr_fn(engine: EngineName) -> Callable[[Image.Image], str]:
         from src.ocr_paddle import ocr_page_paddle
 
         return ocr_page_paddle
+    if engine == "deepseek":
+        from src.ocr_deepseek import ocr_page_deepseek
+
+        return ocr_page_deepseek
     if engine == "gemini":
         from src.ocr_gemini import ocr_page_gemini
 

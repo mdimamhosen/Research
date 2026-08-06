@@ -26,7 +26,8 @@ TXT_DIR = ROOT / "data" / "txt"
 
 ENGINE_HELP = {
     "tesseract": "Open source · free · local",
-    "paddle": "Open source · free · local (pip install -r requirements-paddle.txt)",
+    "paddle": "Open source · free · local (requirements-paddle.txt)",
+    "deepseek": "Open VLM · GPU recommended (requirements-deepseek.txt)",
     "gemini": "Cloud VLM · needs GEMINI_API_KEY",
     "openai": "Cloud VLM · needs OPENAI_API_KEY",
     "claude": "Cloud VLM · needs ANTHROPIC_API_KEY",
