@@ -1,10 +1,10 @@
-# Core — automated CLI (open-source OCR)
+# CLI core + PaddleOCR-VL (only engine)
 pymupdf>=1.24.0
 Pillow>=10.0.0
 python-dotenv>=1.0.0
 tqdm>=4.66.0
 numpy>=1.26.0
 
-# Optional open-source engine (PaddleOCR) — install separately if needed:
-#   pip install paddlepaddle paddleocr
-# See requirements-paddle.txt
+# PaddleOCR (install paddlepaddle wheel FIRST — see README / Dockerfile)
+paddleocr>=3.0.0
+paddlex[ocr]>=3.7.0

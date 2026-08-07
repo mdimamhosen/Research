@@ -1,462 +1,308 @@
-# How This OCR System Works (File Relations & Logic)
+# BanglaDialectDataset — Full Build & Architecture Guide
 
-This guide explains **how the code is wired together**: which file calls which, what each file’s job is, and the exact data flow from PDF → `.txt`.
+This document explains **how this tool is built**, **how data flows**, and **how every file relates** — from a scanned Bengali PDF to a UTF-8 `.txt` book file.
+
+**Engine policy:** **PaddleOCR only** (PaddleOCR-VL). No OpenAI / Claude / Gemini / paid APIs.
+
+Related docs:
+- [README.md](README.md) — quick start
+- [TEAM_WORKFLOW.md](TEAM_WORKFLOW.md) — shared team host (Docker) so not everyone installs Paddle
 
 ---
 
-## 1. Big picture
+## 1. What this project does
 
-There are **two front doors** and **one brain**:
+```text
+data/pdfs/*.pdf   →   render pages to images   →   PaddleOCR-VL per page   →   data/txt/*.txt
+```
 
-| Door | File | Who uses it |
-|------|------|-------------|
-| Web UI | `app.py` | You in the browser (`streamlit`) |
-| Terminal | `cli.py` | Batch jobs / scripts |
-| Brain | `src/pipeline.py` | Both doors call this |
+- **Input:** one PDF *or* a folder of PDFs (CLI auto-discovers all of them).
+- **Output:** one UTF-8 `.txt` per PDF, same filename stem (`book.pdf` → `book.txt`).
+- **Format:** page markers + Unicode NFC text.
 
-`app.py` and `cli.py` do **not** talk to Gemini/OpenAI/Claude/Tesseract directly. They only collect settings (engine, DPI, paths) and call `pipeline`. The pipeline then calls the smaller modules.
+Example output:
 
-### Architecture (who calls whom)
+```text
+--- page 1 ---
+
+…page text…
+
+--- page 2 ---
+
+…page text…
+```
+
+---
+
+## 2. How we built it (design choices)
+
+| Decision | Why |
+|----------|-----|
+| Python CLI-first | OCR libs (Paddle, PyMuPDF) are Python-first; model latency dominates, so Go/Rust does not help. |
+| PaddleOCR-VL only | Open-source, Bengali-capable (~0.9B VLM). Classic PP-OCRv5 has no Bengali recognition model. |
+| No paid APIs | Dataset paper / advisor preference: open-source automated pipeline. |
+| Lazy import of Paddle | CLI can start and list PDFs even if Paddle is not installed yet; fails clearly at OCR time. |
+| One `.txt` per book | Simple corpus layout for the dialect dataset paper. |
+| Docker Compose for the team | Heavy deps + model download once on a shared host; teammates only drop PDFs / collect `.txt`. |
+
+Advisor context (summary): open-source models, automated CLI, try Paddle (not Go/Rust), paid OCR only if open-source quality fails — we stayed on Paddle only.
+
+---
+
+## 3. Repository map (every important file)
+
+```text
+BanglaDialectDataset/
+├── cli.py                 # Main entry — batch OCR (1..N PDFs → 1..N .txt)
+├── app.py                 # Optional Streamlit demo (same pipeline)
+├── Dockerfile             # Container image for shared host
+├── docker-compose.yml     # Mount data/pdfs + data/txt for the team
+├── requirements.txt       # Python deps (core + paddleocr)
+├── requirements-paddle.txt# Alias / notes for paddle extras
+├── requirements-ui.txt    # Streamlit only (optional)
+├── .env.example           # Config template (copy to .env)
+├── GUIDE.md               # This file
+├── TEAM_WORKFLOW.md       # How the team shares one OCR machine
+├── README.md              # Short quick start
+├── src/
+│   ├── __init__.py
+│   ├── pipeline.py        # Brain: discover PDFs, call OCR, write files
+│   ├── pdf_pages.py       # PDF → PIL images (PyMuPDF)
+│   ├── ocr_paddle.py      # PaddleOCR-VL (and optional classic PP-OCR)
+│   └── normalize.py       # NFC + page markers
+└── data/
+    ├── pdfs/              # Drop input books here
+    ├── txt/               # OCR outputs land here
+    └── samples/           # Tiny smoke-test assets
+```
+
+---
+
+## 4. File relations (who calls whom)
 
 ```mermaid
 flowchart TB
-  subgraph doors [Front doors]
-    App[app.py Streamlit UI]
-    Cli[cli.py batch CLI]
+  subgraph doors [Entry points]
+    Cli[cli.py]
+    App[app.py]
+    Docker[Docker Compose]
   end
 
-  subgraph brain [Brain]
-    Pipeline[pipeline.py]
+  subgraph brain [Orchestration]
+    Pipe[pipeline.py]
   end
 
   subgraph workers [Workers]
-    PdfPages[pdf_pages.py]
-    Normalize[normalize.py]
-    Env[".env API keys"]
+    Pdf[pdf_pages.py]
+    Pad[ocr_paddle.py]
+    Norm[normalize.py]
   end
 
-  subgraph engines [OCR engines lazy-loaded]
-    Gemini[ocr_gemini.py default]
-    OpenAI[ocr_openai.py]
-    Claude[ocr_claude.py]
-    Tess[ocr_tesseract.py]
-    Common[ocr_common.py shared prompt]
-  end
-
-  App -->|"ocr_pdf_to_text discover_pdfs"| Pipeline
-  Cli -->|"ocr_pdf_to_file discover_pdfs"| Pipeline
-  Pipeline --> PdfPages
-  Pipeline --> Normalize
-  Pipeline --> Env
-  Pipeline -->|"_ocr_fn"| Gemini
-  Pipeline -->|"_ocr_fn"| OpenAI
-  Pipeline -->|"_ocr_fn"| Claude
-  Pipeline -->|"_ocr_fn"| Tess
-  Gemini --> Common
-  OpenAI --> Common
-  Claude --> Common
+  Docker --> Cli
+  Cli --> Pipe
+  App --> Pipe
+  Pipe --> Pdf
+  Pipe --> Pad
+  Pipe --> Norm
 ```
 
-### Data flow (PDF → .txt)
-
-```mermaid
-flowchart LR
-  PDF[Scanned PDF] --> Render[pdf_pages.render_pdf_pages]
-  Render --> Images["list of page_number, Image"]
-  Images --> Loop[For each page]
-  Loop --> OCR["ocr_page_gemini / openai / claude / tesseract"]
-  OCR --> PageText[page text string]
-  PageText --> Collect["list of page_number, text"]
-  Collect --> Join[normalize.join_pages]
-  Join --> Doc["UTF-8 book text with page markers"]
-  Doc --> File["data/txt/book_name.txt"]
-```
-
-### Module dependency graph
-
-```mermaid
-flowchart BT
-  App[app.py] --> Pipeline[pipeline.py]
-  Cli[cli.py] --> Pipeline
-  Pipeline --> PdfPages[pdf_pages.py]
-  Pipeline --> Normalize[normalize.py]
-  Pipeline -.->|lazy| Gemini[ocr_gemini.py]
-  Pipeline -.->|lazy| OpenAI[ocr_openai.py]
-  Pipeline -.->|lazy| Claude[ocr_claude.py]
-  Pipeline -.->|lazy| Tess[ocr_tesseract.py]
-  Gemini --> Common[ocr_common.py]
-  OpenAI --> Common
-  Claude --> Common
-```
-
----
-
-## 2. Import / dependency graph (who imports whom)
-
-Arrows in the mermaid graph above mean **“depends on / imports from”**.
-
-Text summary:
+### Import / call graph (text)
 
 ```text
-app.py / cli.py  →  pipeline.py
-pipeline.py      →  pdf_pages.py, normalize.py
-pipeline.py      ─(lazy)→  ocr_gemini / ocr_openai / ocr_claude / ocr_tesseract
-ocr_gemini / ocr_openai / ocr_claude  →  ocr_common.py
+cli.py
+  └─ pipeline.discover_pdfs()          # 1 PDF or N PDFs in a folder
+  └─ pipeline.ocr_pdf_to_file()        # for each PDF
+        └─ ocr_pdf_to_text()
+              └─ iter_ocr_pages()
+                    ├─ pdf_pages.render_pdf_pages()   # PDF → images
+                    └─ ocr_paddle.ocr_page_paddle()   # image → text
+              └─ normalize.join_pages()               # pages → one string
+        └─ Path.write_text()                          # → data/txt/<stem>.txt
+
+app.py  →  same pipeline functions (preview in browser instead of only writing)
 ```
 
-**Important design:** `pipeline` does **lazy import** of OCR engines inside `_ocr_fn()`.
-
-- Why: if `anthropic` / `openai` is not installed, the app can still start and use Gemini.
-- How: only when you pick that engine does Python load its `ocr_*.py` module.
-
-Config files (not imported as Python modules, but related):
-
-| File | Role |
-|------|------|
-| `.env` | Real API keys (gitignored). Loaded by `pipeline` via `python-dotenv`. Active key for now: `GEMINI_API_KEY` (OpenAI/Claude lines commented). |
-| `.env.example` | Template showing which keys exist. |
-| `requirements.txt` | Packages both local venv and Streamlit Cloud install. |
-| `.gitignore` | Keeps `.env`, `data/pdfs`, `data/txt`, `.venv` out of git. |
+**Rule:** UI and CLI never talk to Paddle directly. Only `pipeline` / `ocr_paddle` do.
 
 ---
 
-## 3. End-to-end call chain (one PDF)
-
-When you OCR `data/pdfs/mybook.pdf` with engine `gemini` (current default):
+## 5. End-to-end data flow
 
 ```mermaid
 sequenceDiagram
   participant User
-  participant App as app.py or cli.py
+  participant CLI as cli.py
   participant Pipe as pipeline.py
   participant PDF as pdf_pages.py
-  participant OCR as ocr_gemini.py
+  participant OCR as ocr_paddle.py
   participant Norm as normalize.py
   participant Disk as data/txt
 
-  User->>App: Upload or select PDF
-  App->>Pipe: ocr_pdf_to_text(pdf, engine=gemini)
-  Pipe->>PDF: render_pdf_pages(pdf, dpi)
-  PDF-->>Pipe: list of page_number, Image
-  loop Each page
-    Pipe->>OCR: ocr_page_gemini(image)
-    OCR-->>Pipe: page text
+  User->>CLI: python cli.py -i data/pdfs
+  CLI->>Pipe: discover_pdfs(folder)
+  Pipe-->>CLI: [book1.pdf, book2.pdf, ...]
+  loop each PDF
+    CLI->>Pipe: ocr_pdf_to_file(pdf, bookN.txt)
+    Pipe->>PDF: render_pdf_pages(pdf, dpi=300)
+    PDF-->>Pipe: [(1, img), (2, img), ...]
+    loop each page
+      Pipe->>OCR: ocr_page_paddle(img)
+      OCR-->>Pipe: page text
+    end
+    Pipe->>Norm: join_pages([(1,t1),(2,t2),...])
+    Norm-->>Pipe: full document string
+    Pipe->>Disk: write UTF-8 .txt
   end
-  Pipe->>Norm: join_pages(page texts)
-  Norm-->>Pipe: full UTF-8 document
-  Pipe-->>App: book text
-  App->>Disk: write book_name.txt
 ```
 
-```text
-1. app.py  _run_one(...)
-      OR
-   cli.py  main() → ocr_pdf_to_file(...)
+---
 
-2. pipeline.ocr_pdf_to_text(pdf, engine="gemini", dpi=300)
-      │
-      ├─► pdf_pages.render_pdf_pages(pdf, dpi=300)
-      │      opens PDF with PyMuPDF
-      │      returns [(1, Image), (2, Image), ...]
-      │
-      ├─► _ocr_fn("gemini")  →  ocr_page_gemini
-      │
-      ├─► for each (page_number, image):
-      │      text = ocr_page_gemini(image)
-      │         │
-      │         ├─ reads GEMINI_API_KEY from env
-      │         ├─ sends OCR_SYSTEM_PROMPT + OCR_USER_PROMPT + PIL image to Gemini
-      │         └─ returns raw transcribed string
-      │
-      │      collect (page_number, text)
-      │
-      └─► normalize.join_pages([(1, "..."), (2, "...")])
-             for each page: normalize_text()  → NFC + tidy whitespace
-             glue with "--- page N ---"
-             return one big string
+## 6. Code segment guide (what each module does)
 
-3. Write UTF-8 file:
-   app.py  → data/txt/mybook.txt  (and offer download)
-   cli.py  → same via ocr_pdf_to_file()
+### `cli.py` — batch door
+
+**Job:** Parse flags, discover PDFs, loop, show progress, write summary.
+
+Critical segments:
+
+1. **Auto-detect 1..N PDFs** via `discover_pdfs(args.input, recursive=...)`.
+2. **Print the list** so you see what will run.
+3. **Per PDF:** map `book.pdf` → `data/txt/book.txt` (or `book_2.txt` if name taken and not `--force`).
+4. **`--skip-existing`:** resume a long corpus without redoing finished books.
+
+```bash
+# Folder with many PDFs → many .txt
+python cli.py -i data/pdfs -o data/txt --skip-existing
+
+# Single file
+python cli.py -i data/pdfs/one_book.pdf -o data/txt
+
+# Nested folders
+python cli.py -i data/pdfs --recursive --skip-existing
 ```
 
-Same chain for OpenAI / Claude / Tesseract — only the middle function changes (`ocr_page_openai` / `ocr_page_claude` / `ocr_page_tesseract`).
+### `src/pipeline.py` — brain
 
----
+| Function | Role |
+|----------|------|
+| `discover_pdfs` | File → `[that]`; dir → all `*.pdf` (optional recursive) |
+| `iter_ocr_pages` | Render + OCR, yield `(page_number, text)` |
+| `ocr_pdf_to_text` | Join all pages into one string |
+| `ocr_pdf_to_file` | Write UTF-8 file |
+| `resolve_default_engine` | Reads `OCR_ENGINE`, else `paddle` |
+| `unique_path` | Avoid silent overwrite (`book_2.txt`, …) |
 
-## 4. Each file: job, logic, relations
-
-### `app.py` — UI layer only
-
-**Job:** Draw the Streamlit screen; collect user choices; show progress; save/download `.txt`.
-
-**Does NOT:** Call OpenAI itself, render PDFs, or normalize text.
-
-**Relations:**
-- Imports from `src.pipeline`: `ENGINES`, `resolve_default_engine`, `count_pages`, `discover_pdfs`, `ocr_pdf_to_text`
-- Writes uploads into `data/pdfs/`
-- Writes results into `data/txt/`
-
-**Logic flow inside:**
-1. Sidebar → user picks `engine`, `dpi`, overwrite flag
-2. Tab “Upload” → save PDF bytes to disk → `_run_one(...)`
-3. Tab “Folder” → `discover_pdfs(data/pdfs)` → `_run_one` for each
-4. `_run_one` calls `ocr_pdf_to_text(...)` with an `on_progress` callback that updates the Streamlit progress bar
-5. Shows preview + download button
-
-**`sys.path` trick:** Streamlit Cloud runs from the **repo root**, so `from src.pipeline` would fail unless we insert `BanglaDialectDataset/` onto `sys.path`. Local runs from that folder also work with the same code.
-
----
-
-### `cli.py` — batch layer only
-
-**Job:** Parse CLI flags; loop PDFs; print progress with `tqdm`.
-
-**Relations:**
-- Imports from `src.pipeline`: `ENGINES`, `discover_pdfs`, `ocr_pdf_to_file`, `resolve_default_engine`
-- Default paths: `data/pdfs` → `data/txt`
-
-**Logic:**
-1. Parse `--input`, `--output`, `--engine`, `--dpi`, page range, `--force`
-2. `discover_pdfs(input)` → list of PDF paths
-3. For each PDF, output = `output/<stem>.txt`
-4. Skip if file exists and not `--force`
-5. Call `ocr_pdf_to_file(...)` (pipeline writes the file)
-
-`cli` uses `ocr_pdf_to_file`; `app` uses `ocr_pdf_to_text` then writes itself so it can preview before/while saving. Same OCR core either way.
-
----
-
-### `src/pipeline.py` — the brain (orchestration)
-
-**Job:** Connect rendering + OCR + joining + file I/O. Single place that knows the full recipe.
-
-**Relations (outbound):**
-| Function | Calls |
-|----------|--------|
-| `iter_ocr_pages` | `render_pdf_pages` → then per-page OCR fn |
-| `ocr_pdf_to_text` | `iter_ocr_pages` → `join_pages` |
-| `ocr_pdf_to_file` | `ocr_pdf_to_text` → `Path.write_text` |
-| `_ocr_fn` | lazy-imports one of the three `ocr_*.py` modules |
-| startup | `load_dotenv(ROOT / ".env")` so keys exist before OCR |
-
-**Key functions:**
-
-```text
-resolve_default_engine()
-  if GEMINI_API_KEY (or GOOGLE_API_KEY) → "gemini"
-  else if OPENAI_API_KEY → "openai"
-  else if ANTHROPIC_API_KEY → "claude"
-  else → "tesseract"
-
-_ocr_fn(engine) → function(image) -> str
-  "gemini"    → ocr_page_gemini
-  "openai"    → ocr_page_openai
-  "claude"    → ocr_page_claude
-  "tesseract" → ocr_page_tesseract
-
-iter_ocr_pages(...)  → yields (page_number, text) one by one
-ocr_pdf_to_text(...) → full document string
-ocr_pdf_to_file(...) → writes .txt (skip if exists unless force)
-discover_pdfs(path)  → [Path, ...] for one file or a folder
-```
-
-`count_pages` is re-exported from `pdf_pages` so the UI can show “N pages” without importing `pdf_pages` itself.
-
----
+Engine list is only `("paddle",)` — paid engines were removed on purpose.
 
 ### `src/pdf_pages.py` — PDF → images
 
-**Job:** Turn each PDF page into a PIL RGB image.
+Uses **PyMuPDF** (`fitz`). No Poppler install needed.
 
-**Relations:** Used only by `pipeline` (and `count_pages` for the UI). No OCR knowledge.
+- `dpi=300` default (good for scanned books).
+- Returns `(1-based page number, PIL.Image)`.
 
-**Logic:**
-1. Open PDF with PyMuPDF (`fitz`)
-2. Scale = `dpi / 72` (PDF points → pixels)
-3. `page.get_pixmap` → raw pixels → `PIL.Image`
-4. Return `[(1, img), (2, img), ...]`
+### `src/ocr_paddle.py` — image → text
 
-Why PyMuPDF: works on Windows without installing Poppler (unlike `pdf2image`).
+| Piece | Role |
+|-------|------|
+| `_wanted_backend()` | `PADDLE_OCR_BACKEND`: `vl` (default), `ppocr`, `auto` |
+| `_init_vl()` | `PaddleOCRVL` — Bengali-capable path |
+| `_init_ppocr()` | Classic PP-OCR (no Bengali in v5; kept for experiments) |
+| `ocr_page_paddle()` | Run predict/ocr, extract plain text |
+| `paddle_status()` | Lightweight import check for UI |
 
----
+**Why VL by default:** PP-OCRv5 multilingual list does not include Bengali; PaddleOCR-VL (~0.9B) covers 100+ languages including Bengali.
 
-### `src/ocr_common.py` — shared OCR contract
-
-**Job:** One strict system/user prompt + image encoding helpers used by **both** VLMs.
-
-**Relations:**
-- Imported by `ocr_gemini.py`, `ocr_openai.py`, and `ocr_claude.py`
-- **Not** imported by Tesseract (Tesseract has no prompt)
-
-**Logic:**
-- `OCR_SYSTEM_PROMPT` — forces verbatim OCR (no translate/fix/guess/markdown)
-- `OCR_USER_PROMPT` — short “transcribe this page” instruction
-- `image_to_png_bytes` / `image_to_data_url` — PIL image → bytes / base64 data URL (used by OpenAI/Claude)
-
-Changing the prompt here changes Gemini, OpenAI, **and** Claude behavior together. That is intentional.
-
----
-
-### `src/ocr_gemini.py` — one page → text (Gemini, default)
-
-**Relations:** `ocr_common` + `google-genai` SDK + `GEMINI_API_KEY`.
-
-**Logic:**
-1. Require API key (`GEMINI_API_KEY` or `GOOGLE_API_KEY`)
-2. `client.models.generate_content` with `gemini-2.0-flash`, `temperature=0`
-3. Contents = user prompt + PIL image; system instruction = OCR prompt
-4. Return `response.text` stripped
-
-Input type: `PIL.Image`  
-Output type: `str`
-
----
-
-### `src/ocr_openai.py` — one page → text (GPT-4o, optional)
-
-**Relations:** `ocr_common` + `openai` SDK + `OPENAI_API_KEY`.
-
-**Logic:**
-1. Require API key
-2. Convert page image to data URL
-3. `chat.completions.create` with `model="gpt-4o"`, `temperature=0`
-4. Messages = system prompt + user text + image
-5. Return `message.content` stripped
-
-Same `(image) -> str` contract as Gemini.
-
----
-
-### `src/ocr_claude.py` — one page → text (Claude, optional)
-
-**Same contract as OpenAI** (`image → str`), different API shape:
-
-- Uses Anthropic SDK
-- Image sent as base64 PNG block (not data URL)
-- Same prompts from `ocr_common`
-
-Because the function signature matches OpenAI’s, `pipeline._ocr_fn` can swap engines without changing the loop.
-
----
-
-### `src/ocr_tesseract.py` — one page → text (local)
-
-**Relations:** `pytesseract` + system Tesseract binary with `ben` (+ `eng`) language data.
-
-**Logic:** `image_to_string(image, lang="ben+eng")`. No cloud, no prompt file.
-
-Same signature `(image) -> str` so it plugs into the same pipeline loop.
-
----
-
-### `src/normalize.py` — clean & assemble the book text
-
-**Relations:** Called by `pipeline.ocr_pdf_to_text` via `join_pages`. Does not know about PDFs or APIs.
-
-**Logic:**
+Env knobs:
 
 ```text
-normalize_text(raw):
-  Unicode NFC          # stable Bangla combining characters
-  unify newlines
-  collapse spaces/tabs
-  collapse 3+ blank lines → 2
-  strip edges
-
-join_pages([(1, t1), (2, t2), ...]):
-  for each page:
-    cleaned = normalize_text(t)
-    skip if empty
-    append "--- page N ---"
-    append cleaned
-  return one UTF-8 string ending with newline
+OCR_ENGINE=paddle
+PADDLE_OCR_BACKEND=vl
+PADDLE_OCR_DEVICE=cpu          # or gpu:0
+PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
 ```
 
-**Why page markers:** later you can split the book by page, re-OCR one bad page, or spot where quality drops.
+### `src/normalize.py` — text cleanup
+
+- Unicode **NFC** (stable Bangla combining forms).
+- Collapse messy whitespace.
+- Insert `--- page N ---` markers via `join_pages`.
+
+### `app.py` — optional UI
+
+Same brain as CLI. Useful for demos; **corpus work should use `cli.py` or Docker**.
 
 ---
 
-## 5. Data shapes between files
-
-| Stage | Type | Produced by | Consumed by |
-|-------|------|-------------|-------------|
-| PDF path | `Path` | `app` / `cli` / `discover_pdfs` | `pipeline`, `pdf_pages` |
-| Page images | `list[tuple[int, Image]]` | `pdf_pages.render_pdf_pages` | `pipeline.iter_ocr_pages` |
-| Page text | `str` | `ocr_*` | `pipeline` collector |
-| Page list | `list[tuple[int, str]]` | `iter_ocr_pages` | `normalize.join_pages` |
-| Book text | `str` (UTF-8) | `join_pages` | `app` preview / `ocr_pdf_to_file` write |
-| Output file | `data/txt/<name>.txt` | `app` or `pipeline.ocr_pdf_to_file` | you / dataset pipeline |
-
-Every OCR backend is forced into the same interface:
-
-```text
-ocr_page_*(image: PIL.Image) -> str
-```
-
-That is the **plug** that lets three engines share one loop in `pipeline`.
-
----
-
-## 6. Config & secrets flow
-
-```text
-Local:
-  .env  ──load_dotenv──►  os.environ  ──►  ocr_gemini (default) / openai / claude
-
-Streamlit Cloud:
-  Secrets TOML  ──inject──►  os.environ  ──►  same code paths
-  Example: GEMINI_API_KEY = "..."
-  (no .env file on Cloud; do not commit .env)
-```
-
-`resolve_default_engine()` only **reads** env vars; it never prints keys.
-
----
-
-## 7. Why files are split this way
-
-| Split | Reason |
-|-------|--------|
-| UI (`app`) vs CLI (`cli`) vs brain (`pipeline`) | Change the UI without touching OCR; reuse one pipeline in both doors |
-| `pdf_pages` separate from OCR | Rendering is local CPU; OCR is API/Tesseract — different failure modes |
-| Three `ocr_*.py` + shared `ocr_common` | Same prompt/contract; swap provider without rewriting the loop |
-| `normalize` separate | Post-processing stays testable without calling APIs |
-| Lazy imports in `_ocr_fn` | Missing Claude package must not crash OpenAI-only use |
-
----
-
-## 8. Minimal mental model
-
-Remember this one sentence:
-
-> **`app` / `cli` ask `pipeline`; `pipeline` turns PDF pages into images, sends each image to one `ocr_*` function, then `normalize` stitches the strings into a UTF-8 book file.**
-
-If you need to change behavior:
-
-| Want to change… | Edit this file |
-|-----------------|----------------|
-| Buttons / layout / upload UX | `app.py` |
-| CLI flags / batch defaults | `cli.py` |
-| Order of steps / skip logic / default engine | `src/pipeline.py` |
-| DPI rendering / page crop | `src/pdf_pages.py` |
-| “Don’t translate / don’t fix spelling” rules | `src/ocr_common.py` |
-| Gemini model name / API call | `src/ocr_gemini.py` |
-| OpenAI model name / API call | `src/ocr_openai.py` |
-| Claude model name / API call | `src/ocr_claude.py` |
-| Local OCR language | `src/ocr_tesseract.py` |
-| NFC / page markers / whitespace | `src/normalize.py` |
-| Which packages install | `requirements.txt` |
-
----
-
-## 9. Quick local run (for testing the wiring)
+## 7. Local install (one developer machine)
 
 ```bash
 cd EDGE/BanglaDialectDataset
-.venv/Scripts/python -m streamlit run app.py
-# or
-.venv/Scripts/python cli.py -i data/pdfs -o data/txt --engine gemini --page-start 1 --page-end 1
+py -3.13 -m venv .venv
+.venv\Scripts\activate          # Windows
+# source .venv/bin/activate     # Linux/macOS
+
+pip install paddlepaddle==3.3.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
+pip install -r requirements.txt
+
+copy .env.example .env          # optional tweaks
+
+# Drop PDFs, then:
+python cli.py -i data/pdfs -o data/txt --skip-existing
 ```
 
-Put a PDF in `data/pdfs/`. Result appears in `data/txt/` with the same basename.
+First Paddle run downloads models into `~/.paddlex` (can take several minutes).
+
+Smoke-test one page:
+
+```bash
+python cli.py -i data/pdfs/book.pdf -o data/txt --page-start 1 --page-end 1
+```
+
+---
+
+## 8. Publishing / sharing the CLI
+
+| Approach | Who installs Paddle? | Best for |
+|----------|----------------------|----------|
+| **Git clone + local venv** | Each person | Solo / power users |
+| **Docker Compose on one host** (recommended) | Only the host | Whole research team |
+| Streamlit Cloud | Cloud | Not suitable for heavy VL models |
+| MongoDB | N/A | **Not needed** for a `.txt` corpus |
+| GitHub Actions OCR | CI runners | Possible but slow / quota-heavy for big books |
+
+**Most effective for your team:** run OCR **once** on a shared Docker host; store all `.txt` in one `data/txt` folder (synced or committed). See [TEAM_WORKFLOW.md](TEAM_WORKFLOW.md).
+
+Anyone with the repo can still run locally — Docker does not block that.
+
+---
+
+## 9. Output contract (dataset paper)
+
+- Encoding: UTF-8
+- Normalization: Unicode NFC
+- One file per book: `data/txt/<pdf_stem>.txt`
+- Page markers for QA / re-OCR of a single page later
+
+Methods blurb:
+
+> Scanned Bengali book PDFs were rendered with PyMuPDF (300 DPI) and transcribed with open-source PaddleOCR-VL via an automated CLI batch pipeline, producing UTF-8 plain text with Unicode NFC normalization and page markers.
+
+---
+
+## 10. Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| `No PDFs found` | Put files in `data/pdfs/` or pass `-i path` |
+| Paddle import / VL dependency error | `pip install -r requirements.txt` after installing `paddlepaddle` wheel |
+| Slow first run | Model download — wait; use Docker volume `paddle_models` to cache |
+| CPU very slow | Expected for VL; prefer a GPU host (`PADDLE_OCR_DEVICE=gpu:0` + GPU paddle wheel) |
+| Want to re-OCR | `--force` or delete the `.txt` |
+| Resume corpus | `--skip-existing` |
+
+---
+
+## 11. Mental model (one sentence)
+
+> **`cli.py` asks `pipeline` to find every PDF; for each book, `pdf_pages` turns pages into images, `ocr_paddle` reads them with PaddleOCR-VL, `normalize` stitches UTF-8 text, and the result is one `.txt` per PDF in `data/txt/`.**

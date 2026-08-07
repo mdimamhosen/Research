@@ -1,4 +1,4 @@
-"""PDF → UTF-8 .txt OCR pipeline."""
+"""PDF → UTF-8 .txt OCR pipeline (PaddleOCR only)."""
 
 from __future__ import annotations
 
@@ -18,53 +18,33 @@ load_dotenv(ROOT / ".env")
 EngineName = str
 ProgressCallback = Callable[[int, int, int], None]  # page_number, index, total
 
-
-ENGINES = ("tesseract", "paddle", "deepseek", "gemini", "openai", "claude")
-OPEN_SOURCE_ENGINES = ("tesseract", "paddle", "deepseek")
+# Single open-source engine for this project (no paid APIs).
+ENGINES = ("paddle",)
+OPEN_SOURCE_ENGINES = ("paddle",)
 
 
 def resolve_default_engine() -> EngineName:
-    """Prefer open-source local engines for the automated CLI pipeline."""
+    """Always PaddleOCR unless OCR_ENGINE is explicitly set to a known engine."""
     forced = (os.getenv("OCR_ENGINE") or "").strip().lower()
     if forced in ENGINES:
         return forced
-    return "tesseract"
+    return "paddle"
 
 
 def _ocr_fn(engine: EngineName) -> Callable[[Image.Image], str]:
-    """Lazy-import backends so missing optional deps don't break startup."""
+    """Lazy-import so missing paddle deps fail only when OCR starts."""
     engine = engine.lower().strip()
-    if engine == "tesseract":
-        from src.ocr_tesseract import ocr_page_tesseract
-
-        return ocr_page_tesseract
     if engine == "paddle":
         from src.ocr_paddle import ocr_page_paddle
 
         return ocr_page_paddle
-    if engine == "deepseek":
-        from src.ocr_deepseek import ocr_page_deepseek
-
-        return ocr_page_deepseek
-    if engine == "gemini":
-        from src.ocr_gemini import ocr_page_gemini
-
-        return ocr_page_gemini
-    if engine == "openai":
-        from src.ocr_openai import ocr_page_openai
-
-        return ocr_page_openai
-    if engine == "claude":
-        from src.ocr_claude import ocr_page_claude
-
-        return ocr_page_claude
-    raise ValueError(f"Unknown engine '{engine}'. Choose from: {', '.join(ENGINES)}")
+    raise ValueError(f"Unknown engine '{engine}'. Only supported: {', '.join(ENGINES)}")
 
 
 def iter_ocr_pages(
     pdf_path: Path | str,
     *,
-    engine: EngineName = "gemini",
+    engine: EngineName = "paddle",
     dpi: int = 300,
     page_start: int | None = None,
     page_end: int | None = None,
@@ -86,7 +66,7 @@ def iter_ocr_pages(
 def ocr_pdf_to_text(
     pdf_path: Path | str,
     *,
-    engine: EngineName = "gemini",
+    engine: EngineName = "paddle",
     dpi: int = 300,
     page_start: int | None = None,
     page_end: int | None = None,
@@ -109,7 +89,7 @@ def ocr_pdf_to_file(
     pdf_path: Path | str,
     output_path: Path | str,
     *,
-    engine: EngineName = "gemini",
+    engine: EngineName = "paddle",
     dpi: int = 300,
     page_start: int | None = None,
     page_end: int | None = None,
@@ -134,25 +114,29 @@ def ocr_pdf_to_file(
     return output_path
 
 
-def discover_pdfs(input_path: Path | str) -> list[Path]:
+def discover_pdfs(
+    input_path: Path | str,
+    *,
+    recursive: bool = False,
+) -> list[Path]:
+    """Find one PDF file, or all PDFs in a folder (optionally recursive)."""
     path = Path(input_path)
     if path.is_file():
         if path.suffix.lower() != ".pdf":
             raise ValueError(f"Not a PDF: {path}")
         return [path]
     if path.is_dir():
-        # Case-insensitive de-dupe (Windows may match *.pdf and *.PDF twice)
-        found = {p.resolve(): p for p in path.glob("*.pdf")}
-        found.update({p.resolve(): p for p in path.glob("*.PDF")})
-        return sorted(found.values(), key=lambda p: p.name.lower())
+        pattern = "**/*.pdf" if recursive else "*.pdf"
+        found = {p.resolve(): p for p in path.glob(pattern) if p.is_file()}
+        # Also catch *.PDF on case-sensitive filesystems when not recursive
+        if not recursive:
+            found.update({p.resolve(): p for p in path.glob("*.PDF") if p.is_file()})
+        return sorted(found.values(), key=lambda p: str(p).lower())
     raise FileNotFoundError(f"Input not found: {path}")
 
 
 def unique_path(directory: Path | str, stem: str, suffix: str) -> Path:
-    """Return directory/stem.suffix, or stem_2.suffix, stem_3.suffix, ... if taken.
-
-    Ensures each new book/upload gets its own file for a growing dataset.
-    """
+    """Return directory/stem.suffix, or stem_2.suffix, stem_3.suffix, ... if taken."""
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     if not suffix.startswith("."):

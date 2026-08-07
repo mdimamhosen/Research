@@ -1,77 +1,78 @@
-# BanglaDialectDataset — Bengali Book OCR (CLI-first)
+# BanglaDialectDataset — Bengali Book OCR (CLI-first, Paddle only)
 
-Automated tool to OCR scanned Bengali (Bangla) book PDFs into UTF-8 `.txt` files for the dataset paper.
+Automated tool: scanned Bengali (Bangla) book PDFs → UTF-8 `.txt` via **PaddleOCR-VL**.
 
-**Primary interface: CLI.** Open-source engines by default (`tesseract`, optional `paddle`). No paid API required. Python is the intentional language choice.
+- **No paid APIs** (no OpenAI / Claude / Gemini).
+- **CLI auto-detects** one PDF or a whole folder → **one `.txt` per PDF**.
+- **Team sharing:** run once via Docker on a shared host — see [TEAM_WORKFLOW.md](TEAM_WORKFLOW.md).
+- Full architecture: [GUIDE.md](GUIDE.md).
 
-Optional Streamlit UI is for demos only (`requirements-ui.txt`).
-
-## Quick start (CLI)
+## Quick start (local)
 
 ```bash
 cd EDGE/BanglaDialectDataset
 py -3.13 -m venv .venv
-.venv/Scripts/activate          # Windows
+.venv\Scripts\activate
+pip install paddlepaddle==3.3.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
 pip install -r requirements.txt
 
-# Install Tesseract OS package once:
-#   winget install UB-Mannheim.TesseractOCR
-# Bengali model files live in ./tessdata/ (ben + eng)
-
-# Drop PDFs here, then run:
-python cli.py -i data/pdfs -o data/txt --engine tesseract --skip-existing
+# Drop PDFs into data/pdfs/, then batch all of them:
+python cli.py -i data/pdfs -o data/txt --skip-existing
 ```
 
-### Useful CLI flags
+### Useful commands
 
 ```bash
-# Resume a large corpus (skip books that already have .txt)
-python cli.py -i data/pdfs -o data/txt --engine tesseract --skip-existing
+# One file
+python cli.py -i data/pdfs/book.pdf -o data/txt
 
-# Overwrite same-named outputs
-python cli.py -i data/pdfs -o data/txt --engine tesseract --force
+# Folder (auto-detect 1..N PDFs → N .txt files)
+python cli.py -i data/pdfs -o data/txt --skip-existing
 
-# Smoke-test a few pages
-python cli.py -i data/pdfs/book.pdf -o data/txt --page-start 1 --page-end 3
+# Nested folders
+python cli.py -i data/pdfs --recursive --skip-existing
 
-# Optional open-source alternative (after requirements-paddle.txt)
-python cli.py -i data/pdfs -o data/txt --engine paddle --skip-existing
-
-# DeepSeek-OCR open VLM (GPU recommended; smoke-test 1 page first)
-pip install -r requirements-deepseek.txt
-python cli.py -i data/pdfs/book.pdf -o data/txt --engine deepseek --page-start 1 --page-end 1
+# Smoke-test 1 page
+python cli.py -i data/pdfs/book.pdf -o data/txt --page-start 1 --page-end 1
 ```
 
-## Engines
+## Team / publish without everyone installing Paddle
 
-| Engine | License / cost | Notes |
-|--------|----------------|-------|
-| `tesseract` | Open source · **default** | Local CLI; needs `ben` language data |
-| `paddle` | Open source · optional | `pip install -r requirements-paddle.txt` |
-| `deepseek` | Open source VLM · optional | `pip install -r requirements-deepseek.txt` · GPU ~8GB+ VRAM |
-| `gemini` / `openai` / `claude` | Paid APIs · optional | Not part of the default paper pipeline |
+**Most effective:** Docker Compose on one lab PC or VPS. Teammates only drop PDFs and collect `.txt`.
 
-Default resolution: `OCR_ENGINE` in `.env`, else **`tesseract`**.
+```bash
+docker compose build
+# put PDFs in ./data/pdfs/
+docker compose run --rm ocr
+# outputs in ./data/txt/
+```
+
+Details, roles, cron, and why not MongoDB/CI: **[TEAM_WORKFLOW.md](TEAM_WORKFLOW.md)**.
+
+Anyone can still clone and run locally — same CLI.
+
+## Engine
+
+| Engine | Notes |
+|--------|--------|
+| `paddle` | **Only engine.** PaddleOCR-VL by default (`PADDLE_OCR_BACKEND=vl`) |
 
 ## Layout
 
 ```text
 BanglaDialectDataset/
-  cli.py                 # ← main automated entrypoint
+  cli.py                 # main automated entrypoint
   app.py                 # optional Streamlit demo
-  requirements.txt       # CLI core
-  requirements-paddle.txt
-  requirements-ui.txt
+  Dockerfile / docker-compose.yml
+  GUIDE.md               # full build + file relations
+  TEAM_WORKFLOW.md       # shared host for the team
   src/
-    pipeline.py
+    pipeline.py          # discover PDFs + orchestrate
     pdf_pages.py
-    ocr_tesseract.py
     ocr_paddle.py
     normalize.py
-    ...
-  data/pdfs/             # input books
-  data/txt/              # UTF-8 outputs
-  tessdata/              # Tesseract ben/eng models
+  data/pdfs/             # inputs
+  data/txt/              # outputs
 ```
 
 ## Output format
@@ -86,24 +87,8 @@ BanglaDialectDataset/
 <extracted text>
 ```
 
-- Encoding: UTF-8 · Unicode NFC
-- One `.txt` per book; `--skip-existing` for safe re-runs on a large corpus
-
-## Optional UI
-
-```bash
-pip install -r requirements-ui.txt
-.venv/Scripts/python -m streamlit run app.py
-```
+UTF-8 · Unicode NFC · `--skip-existing` for safe corpus resumes.
 
 ## Methods blurb (paper)
 
-> Scanned Bengali book PDFs were rendered with PyMuPDF (300 DPI) and transcribed with open-source OCR (Tesseract `ben+eng`; optionally PaddleOCR). Processing was automated via a command-line batch pipeline producing UTF-8 plain text with Unicode NFC normalization and page markers. No commercial vision API was required for the core corpus.
-
-## Why Python
-
-OCR libraries for Bangla (Tesseract bindings, PaddleOCR, PDF rendering) are Python-first. The contribution is an engineering pipeline, not a new ML model — Python keeps the stack small and reproducible.
-
-## Docs
-
-- [GUIDE.md](GUIDE.md) — module relations and data flow
+> Scanned Bengali book PDFs were rendered with PyMuPDF (300 DPI) and transcribed with open-source PaddleOCR-VL. Processing was automated via a command-line batch pipeline producing UTF-8 plain text with Unicode NFC normalization and page markers. No commercial vision API was used.

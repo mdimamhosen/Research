@@ -1,0 +1,31 @@
+# Shared team OCR host: one machine runs Paddle; everyone uses the same folders.
+#
+# Usage (on the host that has Docker):
+#   1. Put PDFs in ./data/pdfs/
+#   2. docker compose run --rm ocr
+#   3. Read .txt from ./data/txt/
+#
+# Optional watch loop (re-scan folder every run; skip existing):
+#   docker compose run --rm ocr -i data/pdfs -o data/txt --skip-existing
+
+services:
+  ocr:
+    build: .
+    image: bangla-dialect-ocr:paddle
+    working_dir: /app
+    environment:
+      OCR_ENGINE: paddle
+      PADDLE_OCR_BACKEND: vl
+      PADDLE_OCR_DEVICE: cpu
+      PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: "True"
+    volumes:
+      # Team-shared input / output (host paths)
+      - ./data/pdfs:/app/data/pdfs
+      - ./data/txt:/app/data/txt
+      # Persist downloaded Paddle models across runs
+      - paddle_models:/root/.paddlex
+    # Default: batch all PDFs, resume-friendly
+    command: ["-i", "data/pdfs", "-o", "data/txt", "--engine", "paddle", "--skip-existing"]
+
+volumes:
+  paddle_models:

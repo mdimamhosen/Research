@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Automated CLI: scanned Bengali PDFs → UTF-8 .txt (open-source OCR by default)."""
+"""Automated CLI: scanned Bengali PDFs → UTF-8 .txt via PaddleOCR (batch-ready)."""
 
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ from tqdm import tqdm
 
 from src.pipeline import (
     ENGINES,
-    OPEN_SOURCE_ENGINES,
     discover_pdfs,
     ocr_pdf_to_file,
     resolve_default_engine,
@@ -32,43 +31,53 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cli.py",
         description=(
-            "Batch-OCR scanned Bengali book PDFs into UTF-8 .txt files. "
-            "Default engines are open-source (tesseract, paddle)."
+            "Batch-OCR scanned Bengali book PDFs into UTF-8 .txt files "
+            "using PaddleOCR-VL. Pass one PDF file OR a folder of PDFs — "
+            "each PDF becomes its own .txt (same stem name)."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  python cli.py                         # all PDFs in data/pdfs/\n"
+            "  python cli.py -i book.pdf             # one file\n"
+            "  python cli.py -i data/pdfs --recursive\n"
+            "  python cli.py -i data/pdfs --skip-existing\n"
+        ),
     )
     parser.add_argument(
         "--input",
         "-i",
         type=Path,
         default=ROOT / "data" / "pdfs",
-        help="PDF file or directory of PDFs",
+        help="One PDF file, OR a directory containing PDFs (auto-detects 1..N)",
     )
     parser.add_argument(
         "--output",
         "-o",
         type=Path,
         default=ROOT / "data" / "txt",
-        help="Output directory for .txt files",
+        help="Output directory — one .txt per PDF",
     )
     parser.add_argument(
         "--engine",
         "-e",
         choices=ENGINES,
         default=None,
-        help=(
-            "OCR engine. Open-source: "
-            + ", ".join(OPEN_SOURCE_ENGINES)
-            + ". Default from OCR_ENGINE env or tesseract."
-        ),
+        help="OCR engine (only paddle). Default from OCR_ENGINE env or paddle.",
     )
     parser.add_argument("--dpi", type=int, default=300, help="PDF render DPI")
     parser.add_argument("--page-start", type=int, default=None, help="First page (1-based)")
     parser.add_argument("--page-end", type=int, default=None, help="Last page (1-based)")
     parser.add_argument(
+        "--recursive",
+        "-r",
+        action="store_true",
+        help="When -i is a folder, also find PDFs in subfolders",
+    )
+    parser.add_argument(
         "--skip-existing",
         action="store_true",
-        help="Skip PDFs that already have output/<stem>.txt (resume-friendly automation)",
+        help="Skip PDFs that already have output/<stem>.txt (resume-friendly)",
     )
     parser.add_argument(
         "--force",
@@ -87,20 +96,23 @@ def main(argv: list[str] | None = None) -> int:
     engine = args.engine or resolve_default_engine()
 
     try:
-        pdfs = discover_pdfs(args.input)
+        pdfs = discover_pdfs(args.input, recursive=args.recursive)
     except (FileNotFoundError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
     if not pdfs:
-        print(f"No PDFs found under {args.input}", file=sys.stderr)
+        print(
+            f"No PDFs found under {args.input}\n"
+            "Drop .pdf files into data/pdfs/ (or pass -i path/to/file.pdf).",
+            file=sys.stderr,
+        )
         return 1
 
     args.output.mkdir(parents=True, exist_ok=True)
-    print(
-        f"Engine: {engine} | DPI: {args.dpi} | PDFs: {len(pdfs)} | "
-        f"open-source default: {engine in OPEN_SOURCE_ENGINES}"
-    )
+    print(f"Engine: {engine} | DPI: {args.dpi} | Discovered PDFs: {len(pdfs)}")
+    for i, pdf in enumerate(pdfs, start=1):
+        print(f"  [{i}/{len(pdfs)}] {pdf}")
 
     ok = skipped = failed = 0
 

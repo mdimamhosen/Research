@@ -11,7 +11,7 @@ if str(ROOT) not in sys.path:
 
 import streamlit as st
 
-from src.ocr_tesseract import tesseract_status
+from src.ocr_paddle import paddle_status
 from src.pipeline import (
     ENGINES,
     count_pages,
@@ -25,12 +25,7 @@ PDF_DIR = ROOT / "data" / "pdfs"
 TXT_DIR = ROOT / "data" / "txt"
 
 ENGINE_HELP = {
-    "tesseract": "Open source · free · local",
-    "paddle": "Open source · free · local (requirements-paddle.txt)",
-    "deepseek": "Open VLM · GPU recommended (requirements-deepseek.txt)",
-    "gemini": "Cloud VLM · needs GEMINI_API_KEY",
-    "openai": "Cloud VLM · needs OPENAI_API_KEY",
-    "claude": "Cloud VLM · needs ANTHROPIC_API_KEY",
+    "paddle": "Open source · PaddleOCR-VL (Bengali) · local / Docker",
 }
 
 
@@ -367,7 +362,7 @@ def main() -> None:
   <p class="bdd-tag">Scan Bengali book PDFs into faithful UTF-8 text — no translation, no rewriting. Built for a growing dialect corpus.</p>
   <div class="bdd-steps">
     <div class="bdd-step"><b>01 · Source</b><span>Upload PDFs or batch a folder of scanned books.</span></div>
-    <div class="bdd-step"><b>02 · Extract</b><span>OCR each page with Tesseract or a cloud vision model.</span></div>
+    <div class="bdd-step"><b>02 · Extract</b><span>OCR each page with open-source PaddleOCR-VL.</span></div>
     <div class="bdd-step"><b>03 · Keep</b><span>Every book gets its own .txt — numbered, never silently skipped.</span></div>
   </div>
 </div>
@@ -378,7 +373,7 @@ def main() -> None:
     with st.sidebar:
         st.markdown('<p class="bdd-side-title">Controls</p>', unsafe_allow_html=True)
         st.markdown(
-            '<p class="bdd-side-note">Tune the engine before you extract. Tesseract is free and local; cloud engines need API keys.</p>',
+            '<p class="bdd-side-note">PaddleOCR-VL only — open source, no paid APIs. Prefer the CLI for batch corpus work.</p>',
             unsafe_allow_html=True,
         )
 
@@ -401,7 +396,14 @@ def main() -> None:
             help="Off (recommended): if book.txt exists, write book_2.txt instead.",
         )
 
-        ok, status_msg = tesseract_status()
+        status = paddle_status()
+        ok = bool(status.get("import_ok") and status.get("has_vl"))
+        status_msg = (
+            f"PaddleOCR import OK · VL={'yes' if status.get('has_vl') else 'no'} · "
+            f"backend={status.get('wanted_backend')}"
+            if ok
+            else "PaddleOCR not installed. Run: pip install -r requirements-paddle.txt"
+        )
         cls = "ok" if ok else "bad"
         label = "Engine status" if ok else "Action needed"
         st.markdown(

@@ -1,0 +1,15 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.git/
+.env
+data/pdfs/*
+!data/pdfs/.gitkeep
+data/txt/*
+!data/txt/.gitkeep
+data/samples/*
+!data/samples/.gitkeep
+tessdata/*.traineddata
+*.md
+!README.md
