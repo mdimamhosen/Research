@@ -18,13 +18,13 @@ load_dotenv(ROOT / ".env")
 EngineName = str
 ProgressCallback = Callable[[int, int, int], None]  # page_number, index, total
 
-# Single open-source engine for this project (no paid APIs).
-ENGINES = ("paddle",)
-OPEN_SOURCE_ENGINES = ("paddle",)
+# Open-source only (no paid APIs). paddle = quality Bangla; tesseract = fast CPU.
+ENGINES = ("paddle", "tesseract")
+OPEN_SOURCE_ENGINES = ("paddle", "tesseract")
 
 
 def resolve_default_engine() -> EngineName:
-    """Always PaddleOCR unless OCR_ENGINE is explicitly set to a known engine."""
+    """Prefer OCR_ENGINE from .env; default paddle (Bangla quality)."""
     forced = (os.getenv("OCR_ENGINE") or "").strip().lower()
     if forced in ENGINES:
         return forced
@@ -32,13 +32,17 @@ def resolve_default_engine() -> EngineName:
 
 
 def _ocr_fn(engine: EngineName) -> Callable[[Image.Image], str]:
-    """Lazy-import so missing paddle deps fail only when OCR starts."""
+    """Lazy-import so missing optional deps fail only when OCR starts."""
     engine = engine.lower().strip()
     if engine == "paddle":
         from src.ocr_paddle import ocr_page_paddle
 
         return ocr_page_paddle
-    raise ValueError(f"Unknown engine '{engine}'. Only supported: {', '.join(ENGINES)}")
+    if engine == "tesseract":
+        from src.ocr_tesseract import ocr_page_tesseract
+
+        return ocr_page_tesseract
+    raise ValueError(f"Unknown engine '{engine}'. Choose from: {', '.join(ENGINES)}")
 
 
 def iter_ocr_pages(

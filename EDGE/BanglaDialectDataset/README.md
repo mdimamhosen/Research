@@ -6,6 +6,7 @@ Automated tool: scanned Bengali (Bangla) book PDFs → UTF-8 `.txt` via **Paddle
 - **CLI auto-detects** one PDF or a whole folder → **one `.txt` per PDF**.
 - **Team sharing:** run once via Docker on a shared host — see [TEAM_WORKFLOW.md](TEAM_WORKFLOW.md).
 - Full architecture: [GUIDE.md](GUIDE.md).
+- **Kaggle GPU:** [KAGGLE.md](KAGGLE.md) — no per-file PDF copy; use `--kaggle`.
 
 ## Quick start (local)
 
@@ -34,7 +35,24 @@ python cli.py -i data/pdfs --recursive --skip-existing
 
 # Smoke-test 1 page
 python cli.py -i data/pdfs/book.pdf -o data/txt --page-start 1 --page-end 1
+
+# Faster on CPU (no GPU): DPI 150 + skip layout + shrink pages
+.\.venv\Scripts\python.exe cli.py -i data/pdfs -o data/txt --fast --force
+
+# Fastest on CPU: Tesseract (install binary first — see below)
+.\.venv\Scripts\python.exe cli.py -i data/pdfs -o data/txt -e tesseract --force
 ```
+
+**Tesseract install (Windows):** download & run  
+https://github.com/UB-Mannheim/tesseract/wiki  
+During setup tick **Bengali**. Then:
+
+```powershell
+$env:TESSERACT_CMD="C:\Program Files\Tesseract-OCR\tesseract.exe"
+.\.venv\Scripts\python.exe cli.py -i data/pdfs -o data/txt -e tesseract --force
+```
+
+Project already has `tessdata/ben.traineddata` + `eng.traineddata` for language data.
 
 ## Team / publish without everyone installing Paddle
 

@@ -25,7 +25,8 @@ PDF_DIR = ROOT / "data" / "pdfs"
 TXT_DIR = ROOT / "data" / "txt"
 
 ENGINE_HELP = {
-    "paddle": "Open source · PaddleOCR-VL (Bengali) · local / Docker",
+    "paddle": "Open source · PaddleOCR-VL (Bangla quality) · slower on CPU",
+    "tesseract": "Open source · fast CPU · needs ben language pack",
 }
 
 
@@ -373,7 +374,7 @@ def main() -> None:
     with st.sidebar:
         st.markdown('<p class="bdd-side-title">Controls</p>', unsafe_allow_html=True)
         st.markdown(
-            '<p class="bdd-side-note">PaddleOCR-VL only — open source, no paid APIs. Prefer the CLI for batch corpus work.</p>',
+            '<p class="bdd-side-note">Open source only: PaddleOCR-VL (quality) or Tesseract (fast). Prefer CLI for batch work.</p>',
             unsafe_allow_html=True,
         )
 
@@ -396,14 +397,19 @@ def main() -> None:
             help="Off (recommended): if book.txt exists, write book_2.txt instead.",
         )
 
-        status = paddle_status()
-        ok = bool(status.get("import_ok") and status.get("has_vl"))
-        status_msg = (
-            f"PaddleOCR import OK · VL={'yes' if status.get('has_vl') else 'no'} · "
-            f"backend={status.get('wanted_backend')}"
-            if ok
-            else "PaddleOCR not installed. Run: pip install -r requirements-paddle.txt"
-        )
+        if engine == "tesseract":
+            from src.ocr_tesseract import tesseract_status
+
+            ok, status_msg = tesseract_status()
+        else:
+            status = paddle_status()
+            ok = bool(status.get("import_ok") and status.get("has_vl"))
+            status_msg = (
+                f"PaddleOCR OK · VL={'yes' if status.get('has_vl') else 'no'} · "
+                f"fast={status.get('fast')}"
+                if ok
+                else "PaddleOCR not installed. pip install -r requirements.txt"
+            )
         cls = "ok" if ok else "bad"
         label = "Engine status" if ok else "Action needed"
         st.markdown(

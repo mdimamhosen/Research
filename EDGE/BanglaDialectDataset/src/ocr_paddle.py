@@ -5,9 +5,12 @@ including Bengali). Classic PP-OCR multilingual models do not ship Bengali
 recognition in current PP-OCRv5 builds.
 
 Env:
-  PADDLE_OCR_BACKEND   vl | ppocr | auto   (default: vl)
-  PADDLE_OCR_DEVICE    cpu | gpu:0 | ...   (optional)
-  PADDLE_OCR_LANG      lang for classic PP-OCR only (default tries bn/bengali/en)
+  PADDLE_OCR_BACKEND     vl | ppocr | auto   (default: vl)
+  PADDLE_OCR_DEVICE      cpu | gpu:0 | ...   (optional)
+  PADDLE_OCR_LANG        lang for classic PP-OCR only
+  PADDLE_OCR_FAST        1 = skip layout + shrink large pages (much faster on CPU)
+  PADDLE_OCR_USE_LAYOUT  1 = enable layout detection (slower, default off)
+  PADDLE_OCR_MAX_SIDE    max image side in px when fast (default 1280)
 """
 
 from __future__ import annotations
@@ -43,13 +46,59 @@ def _wanted_backend() -> str:
     return "vl"
 
 
+def _fast_mode() -> bool:
+    return (os.getenv("PADDLE_OCR_FAST") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def _use_layout() -> bool:
+    """Layout detection is expensive; off by default for plain book pages."""
+    raw = (os.getenv("PADDLE_OCR_USE_LAYOUT") or "").strip().lower()
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    # Fast mode always disables layout.
+    return False
+
+
+def _max_side() -> int:
+    raw = (os.getenv("PADDLE_OCR_MAX_SIDE") or "").strip()
+    if raw.isdigit():
+        return max(640, int(raw))
+    return 1280 if _fast_mode() else 0  # 0 = no shrink
+
+
+def _shrink_for_speed(image: Image.Image) -> Image.Image:
+    limit = _max_side()
+    if limit <= 0:
+        return image
+    w, h = image.size
+    m = max(w, h)
+    if m <= limit:
+        return image
+    scale = limit / m
+    return image.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.Resampling.BILINEAR)
+
+
 def _install_hint() -> str:
     return (
-        "PaddleOCR is not installed (or VL extras missing). For Bengali books:\n"
+        "PaddleOCR / PaddleOCR-VL Python package is missing (paddlepaddle alone is not enough).\n"
+        "Install BOTH:\n"
+        "  # Kaggle / GPU:\n"
+        "  pip install -q paddlepaddle-gpu==3.2.2 -i https://www.paddlepaddle.org.cn/packages/stable/cu118/\n"
+        "  pip install -q 'paddleocr>=3.0.0' 'paddlex[ocr]>=3.7.0' pymupdf Pillow python-dotenv tqdm\n"
+        "  # Local CPU:\n"
         "  pip install paddlepaddle==3.3.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/\n"
-        "  pip install -r requirements-paddle.txt\n"
-        "Then: python cli.py -i data/pdfs -o data/txt --engine paddle --page-start 1 --page-end 1\n"
-        "Optional: set PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True to skip hoster connectivity checks."
+        "  pip install -r requirements.txt\n"
+        "Then:\n"
+        "  python cli.py -i /kaggle/input/datasets/... -o /kaggle/working/txt -r --engine paddle\n"
+        "  (no need to copy PDFs one-by-one — point -i at the folder)\n"
+        "Optional: PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True"
     )
 
 
@@ -60,9 +109,10 @@ def _init_vl() -> Any:
         raise RuntimeError(_install_hint()) from exc
 
     kwargs: dict[str, Any] = {
-        # Faster / more stable for scanned book pages.
+        # Speed: skip orientation / unwarp / layout for typical scanned books.
         "use_doc_orientation_classify": False,
         "use_doc_unwarping": False,
+        "use_layout_detection": _use_layout(),
     }
     device = _device()
     if device:
@@ -71,10 +121,21 @@ def _init_vl() -> Any:
     try:
         return PaddleOCRVL(**kwargs)
     except TypeError:
-        # Older builds may not accept the doc_* flags.
-        kwargs.pop("use_doc_orientation_classify", None)
-        kwargs.pop("use_doc_unwarping", None)
-        return PaddleOCRVL(**kwargs)
+        # Older builds may not accept some flags — peel them off.
+        for key in (
+            "use_layout_detection",
+            "use_doc_orientation_classify",
+            "use_doc_unwarping",
+        ):
+            kwargs.pop(key, None)
+        try:
+            return PaddleOCRVL(
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False,
+                **({"device": device} if device else {}),
+            )
+        except TypeError:
+            return PaddleOCRVL(**({"device": device} if device else {}))
 
 
 def _init_ppocr() -> Any:
@@ -303,7 +364,7 @@ def _run_predict(engine: Any, image: Image.Image, arr: np.ndarray) -> Any:
 def ocr_page_paddle(image: Image.Image) -> str:
     """Run PaddleOCR-VL (default) or classic PP-OCR on one page image."""
     engine, backend = _get_engine()
-    rgb = image.convert("RGB")
+    rgb = _shrink_for_speed(image.convert("RGB"))
     arr = np.asarray(rgb)
     result = _run_predict(engine, rgb, arr)
 
@@ -320,6 +381,8 @@ def paddle_status() -> dict[str, Any]:
     info: dict[str, Any] = {
         "wanted_backend": _wanted_backend(),
         "device": _device() or "default",
+        "fast": _fast_mode(),
+        "use_layout": _use_layout(),
         "import_ok": False,
         "has_vl": False,
         "has_ppocr": False,
